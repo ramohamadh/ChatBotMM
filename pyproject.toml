@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chatbot-mm"
+version = "0.2.0"
+description = "A fully local Persian/English RAG document question-answering chatbot"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "m.ramedani" }]
+keywords = ["rag", "persian", "farsi", "nlp", "question-answering", "faiss"]
+
+dependencies = [
+    "numpy>=1.24.0",
+    "faiss-cpu>=1.7.4",
+    "PyPDF2>=3.0.0",
+    "python-docx>=1.0.0",
+    "sentence-transformers>=2.2.0",
+    "transformers>=4.40.0",
+    "torch>=2.0.0",
+    "protobuf>=3.20.0",
+    "tiktoken>=0.5.0",
+    "tqdm>=4.65.0",
+    "typer>=0.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "ruff>=0.4",
+    "black>=24.3",
+]
+
+[project.scripts]
+chatbot = "chatbot.cli:main"
+
+[project.urls]
+Repository = "https://github.com/"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = ["E501"]  # line length handled by black
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"

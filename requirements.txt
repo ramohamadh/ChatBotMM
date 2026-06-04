@@ -1,0 +1,25 @@
+# Core dependencies
+numpy>=1.24.0
+faiss-cpu>=1.7.4
+
+# Document processing
+PyPDF2>=3.0.0
+python-docx>=1.0.0
+
+# NLP and embeddings
+sentence-transformers>=2.2.0
+transformers>=4.40.0
+torch>=2.0.0
+# accelerate is optional — only needed if you switch to device_map="auto".
+# accelerate>=0.26.0
+
+# Required for tokenizers
+protobuf>=3.20.0
+tiktoken>=0.5.0
+
+# CLI
+typer>=0.12.0
+
+# Utilities
+tqdm>=4.65.0
+
