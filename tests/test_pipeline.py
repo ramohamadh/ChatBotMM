@@ -41,7 +41,13 @@ def test_ask_routes_to_generative_and_shapes_response(stub_generative):
         vectorstore_directory=str(config.VECTORSTORE_DIR),
         top_k=config.TOP_K,
         use_generative=True,
+        # Must match the model the on-disk index was built with, or the
+        # dimension check refuses to load it.
+        embedding_model=config.EMBEDDING_MODEL,
         generative_model=config.GENERATIVE_MODEL,
+        # Force the transformers backend so the stubbed GenerativeQA is used
+        # (the llama.cpp backend would load a real GGUF model).
+        generative_backend="transformers",
     )
     assert rag.use_generative is True
     assert type(rag.qa).__name__ == "_StubGen"
