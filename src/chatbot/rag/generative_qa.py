@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 # find an answer it tends to parrot its own instructions back, so the less
 # quotable text here, the better.
 SYSTEM_PROMPT = (
-    "فقط بر اساس متن زمینه پاسخ بده و به فارسی روان بنویس. "
+    "فقط بر اساس متن زمینه پاسخ بده و به فارسی روان بنویس؛ "
+    "کدها، JSON و شناسه‌های انگلیسی را همان‌طور که در متن هستند نقل کن. "
     "پاسخ کامل و با جزئیات باشد: همهٔ نکته‌های مرتبط با سؤال را از متن زمینه بیاور "
     "و اگر چند مورد مرتبط در متن هست، همهٔ آن‌ها را فهرست کن. "
     "هیچ جمله‌ای را تکرار نکن و چیزی از خودت نساز. "
@@ -140,6 +141,7 @@ class GenerativeQA:
         question: str,
         chunks: list[dict],
         stream_callback: Callable[[str], None] | None = None,
+        verbatim: bool = False,
     ) -> dict:
         """
         Generate an answer to `question` grounded in the retrieved `chunks`.
@@ -148,6 +150,9 @@ class GenerativeQA:
             stream_callback: If given, called with each piece of text as it is
                 generated, so the caller can display the answer live instead
                 of waiting for the whole generation to finish.
+            verbatim: Disable repetition penalties so the model can quote
+                token-repetitive content (JSON samples, tables) from the
+                context without being pushed into refusing.
 
         Returns a dict shaped like the extractive QA result so it's a drop-in
         replacement: {answer, score, source_chunks}.
@@ -184,13 +189,15 @@ class GenerativeQA:
             do_sample=True,
             temperature=TEMPERATURE,
             top_p=TOP_P,
-            repetition_penalty=REPETITION_PENALTY,
-            # Loose safety net against sentence-level loops. Safe combined
-            # with sampling (the word-mutation failure mode only appears with
-            # greedy decoding + a tight n-gram limit).
-            no_repeat_ngram_size=10,
+            repetition_penalty=1.0 if verbatim else REPETITION_PENALTY,
             pad_token_id=self.tokenizer.eos_token_id,
         )
+        if not verbatim:
+            # Loose safety net against sentence-level loops. Safe combined
+            # with sampling (the word-mutation failure mode only appears with
+            # greedy decoding + a tight n-gram limit). Disabled in verbatim
+            # mode — quoting a JSON sample legitimately repeats n-grams.
+            generate_kwargs["no_repeat_ngram_size"] = 10
 
         if stream_callback is not None:
             # Stream: generate in a worker thread while this thread hands each
