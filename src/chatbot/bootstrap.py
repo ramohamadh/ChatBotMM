@@ -32,6 +32,7 @@ _RUNTIME_DEPS = {
     "sentence-transformers": "sentence_transformers",
     "transformers": "transformers",
     "torch": "torch",
+    "sentencepiece": "sentencepiece",
 }
 
 # Everything, for the full `cli` bootstrap.
