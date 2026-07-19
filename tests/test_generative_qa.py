@@ -1,6 +1,6 @@
 """Tests for GenerativeQA context-building (without downloading the LLM)."""
 
-from chatbot.rag.generative_qa import GenerativeQA, SYSTEM_PROMPT
+from chatbot.rag.generative_qa import SYSTEM_PROMPT, GenerativeQA
 
 
 class _StubGen(GenerativeQA):
@@ -8,6 +8,7 @@ class _StubGen(GenerativeQA):
 
     def __init__(self):
         self.max_new_tokens = 64
+        self.max_context_chars = 3500
         self.device = "cpu"
 
 
