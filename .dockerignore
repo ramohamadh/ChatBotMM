@@ -1,0 +1,13 @@
+.git
+venv
+.venv
+data
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+src/chatbot_mm.egg-info
+.github
+Dockerfile
+.dockerignore
