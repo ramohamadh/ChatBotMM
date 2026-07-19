@@ -72,8 +72,34 @@ chatbot rebuild        # or: chatbot index --force
 | `chatbot index` | Index `data/docs/` into the vector store. `--force` / `-f` rebuilds. |
 | `chatbot rebuild` | Rebuild the index from scratch (alias for `index --force`). |
 | `chatbot ask [QUESTION]` | Ask a question; omit `QUESTION` for interactive mode. `--context` / `-c` shows the retrieved chunks. |
+| `chatbot serve` | Start the REST API server (FastAPI). `--host` / `--port` to bind (default `127.0.0.1:8000`). |
 
 Run `chatbot --help` or `chatbot <command> --help` for full details.
+
+## REST API
+
+`chatbot serve` exposes the same pipeline over HTTP (interactive docs at
+`http://127.0.0.1:8000/docs`):
+
+```bash
+chatbot serve                 # or: python main.py serve
+
+curl -X POST http://127.0.0.1:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "این سند در مورد چیست؟"}'
+# {"answer": "...", "score": 1.0, "sources": ["file.pdf"], "timings": {...}}
+```
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /ask` | Answer a question. Body: `{"question": "...", "return_context": false}`. |
+| `POST /index` | (Re)index `data/docs/`. Body: `{"force": false}`. |
+| `GET /stats` | Index statistics. |
+| `GET /health` | Liveness / readiness (`indexed`, chunk count). |
+
+The answer model loads once at startup, so the first request is as fast as the
+rest. Questions are answered one at a time (the model is CPU-bound);
+concurrent requests are queued.
 
 ## Docker
 
