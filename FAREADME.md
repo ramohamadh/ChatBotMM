@@ -15,7 +15,7 @@
 
 - **خواندن اسناد:** فایل‌های PDF، DOCX، TXT و MD
 - **قطعه‌بندی هوشمند:** اندازه و هم‌پوشانی قابل تنظیم، همراه با نرمال‌سازی فارسی
-- **بردارسازی چندزبانه:** مدل `paraphrase-multilingual-MiniLM-L12-v2` (بیش از ۵۰ زبان از جمله فارسی)
+- **بردارسازی چندزبانه:** مدل `intfloat/multilingual-e5-base` (بازیابی فارسی بسیار بهتر)
 - **ذخیره‌سازی برداری:** FAISS با قابلیت ذخیره/بارگذاری و به‌روزرسانی تدریجی
 - **بازیابی ترکیبی:** جست‌وجوی معنایی + کلیدواژه‌ای
 - **پاسخ مولّد:** مدل زبانی محلی (`Qwen2.5-1.5B-Instruct`) پاسخ روان فارسی می‌نویسد — نه فقط یک تکه‌ی کپی‌شده. یک موتور استخراجی هم به‌عنوان جایگزین موجود است.
@@ -87,8 +87,38 @@ chatbot rebuild        # یا: chatbot index --force
 | `chatbot index` | ایندکس کردن `data/docs/` در ذخیره‌ساز برداری. `--force` / `-f` از نو می‌سازد. |
 | `chatbot rebuild` | ساخت دوباره‌ی ایندکس از ابتدا (معادل `index --force`). |
 | `chatbot ask [QUESTION]` | پرسیدن سؤال؛ بدون `QUESTION` وارد حالت تعاملی می‌شود. `--context` / `-c` قطعات بازیابی‌شده را نشان می‌دهد. |
+| `chatbot serve` | راه‌اندازی سرور REST API (با FastAPI). آدرس و پورت با `--host` / `--port` (پیش‌فرض `127.0.0.1:8000`). |
 
 برای جزئیات کامل `chatbot --help` یا `chatbot <command> --help` را اجرا کنید.
+
+## وب‌سرویس REST
+
+دستور `chatbot serve` همان خط لوله‌ی RAG را روی HTTP در دسترس قرار می‌دهد
+(مستندات تعاملی در `http://127.0.0.1:8000/docs`):
+
+<div dir="ltr">
+
+```bash
+chatbot serve                 # یا: python main.py serve
+
+curl -X POST http://127.0.0.1:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "این سند در مورد چیست؟"}'
+# {"answer": "...", "score": 1.0, "sources": ["file.pdf"], "timings": {...}}
+```
+
+</div>
+
+| Endpoint | کاری که انجام می‌دهد |
+| --- | --- |
+| `POST /ask` | پاسخ به یک سؤال. بدنه: `{"question": "...", "return_context": false}` |
+| `POST /index` | ایندکس (دوباره‌ی) `data/docs/`. بدنه: `{"force": false}` |
+| `GET /stats` | آمار ایندکس |
+| `GET /health` | وضعیت سرویس (`indexed` و تعداد قطعات) |
+
+مدل پاسخ‌دهی یک‌بار هنگام راه‌اندازی سرور بارگذاری می‌شود، بنابراین اولین
+درخواست هم سریع است. سؤال‌ها یکی‌یکی پاسخ داده می‌شوند (مدل CPU-محور است) و
+درخواست‌های هم‌زمان در صف می‌مانند.
 
 ## استفاده در کد پایتون
 
@@ -125,6 +155,7 @@ print(f"Sources: {len(response['source_chunks'])} chunks")
 │   ├── __main__.py         # امکان اجرای python -m chatbot
 │   ├── config.py           # تنظیمات (مسیرها از طریق متغیر محیطی قابل تغییرند)
 │   ├── cli.py              # رابط خط فرمان نازک با Typer (دستور chatbot)
+│   ├── api.py              # وب‌سرویس REST با FastAPI (دستور chatbot serve)
 │   ├── commands.py         # منطق دستورها مستقل از فریم‌ورک
 │   ├── bootstrap.py        # نصب خودکار وابستگی‌ها + اجرای مجدد
 │   └── rag/
@@ -163,7 +194,7 @@ print(f"Sources: {len(response['source_chunks'])} chunks")
 
 ## مدل‌ها
 
-- **بردارسازی:** `paraphrase-multilingual-MiniLM-L12-v2` (۳۸۴ بُعدی، بیش از ۵۰ زبان)
+- **بردارسازی:** `intfloat/multilingual-e5-base` (۷۶۸ بُعدی، چندزبانه با فارسیِ قوی)
 - **تولید پاسخ:** `Qwen/Qwen2.5-1.5B-Instruct` (چندزبانه، فارسیِ خوب)
 - **جایگزین استخراجی:** `mrm8488/bert-multi-cased-finetuned-xquadv1`
 

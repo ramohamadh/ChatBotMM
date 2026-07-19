@@ -12,7 +12,7 @@ questions using a **local generative LLM** — producing fluent, natural answers
 
 - **Document Ingestion**: PDF, DOCX, TXT, and MD files
 - **Smart Chunking**: Configurable chunk size/overlap, with Persian normalization
-- **Multilingual Embeddings**: `paraphrase-multilingual-MiniLM-L12-v2` (50+ languages incl. Persian)
+- **Multilingual Embeddings**: `intfloat/multilingual-e5-base` (much stronger Persian retrieval)
 - **Vector Storage**: FAISS with save/load and incremental updates
 - **Hybrid Retrieval**: Semantic + keyword search
 - **Generative Answers**: Local instruction-tuned LLM (`Qwen2.5-0.5B-Instruct` by default, fast on CPU) writes fluent Persian — not just copied fragments, streamed live into the terminal. An extractive fallback is also available.
@@ -183,7 +183,7 @@ Data locations can be overridden with environment variables:
 
 ## Models
 
-- **Embeddings**: `paraphrase-multilingual-MiniLM-L12-v2` (384-d, 50+ languages)
+- **Embeddings**: `intfloat/multilingual-e5-base` (768-d, multilingual with strong Persian)
 - **Generation**: `Qwen/Qwen2.5-0.5B-Instruct` (multilingual, fast on CPU; `1.5B` optional for quality)
 - **Extractive fallback**: `mrm8488/bert-multi-cased-finetuned-xquadv1`
 
