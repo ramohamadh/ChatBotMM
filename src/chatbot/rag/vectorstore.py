@@ -86,7 +86,9 @@ class FAISSVectorStore:
         # Get results
         results = []
         for i, (idx, similarity) in enumerate(zip(indices[0], similarities[0])):
-            if idx < len(self.chunks):
+            # FAISS pads missing results with -1; a negative index would silently
+            # pick the wrong chunk via Python negative indexing.
+            if 0 <= idx < len(self.chunks):
                 results.append((self.chunks[idx], float(similarity)))
         
         return results
