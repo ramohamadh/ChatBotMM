@@ -5,7 +5,6 @@ All parameters can be adjusted here for different use cases.
 
 import os
 from pathlib import Path
-from typing import Optional
 
 # Base paths
 # config.py lives at <root>/src/chatbot/config.py, so the project root is three
@@ -28,15 +27,17 @@ CHUNK_SIZE = 900  # Number of characters per chunk (longer context for better QA
 CHUNK_OVERLAP = 150  # Overlap between chunks in characters (preserve continuity)
 
 # Embedding settings
-EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"  # Multilingual model (supports Persian)
-EMBEDDING_DIMENSION = 384  # Dimension for multilingual MiniLM
+# multilingual-e5-base: substantially better Persian retrieval than MiniLM.
+# Changing this requires `chatbot rebuild` (the index stores the vectors).
+EMBEDDING_MODEL = "intfloat/multilingual-e5-base"
+EMBEDDING_DIMENSION = 768  # e5-base dimension (MiniLM was 384)
 
 # Vectorstore settings
 VECTORSTORE_INDEX_NAME = "faiss_index"
 VECTORSTORE_METADATA_NAME = "metadata.json"
 
 # Retrieval settings
-TOP_K = 8  # Number of chunks to retrieve (increased for better context)
+TOP_K = 5  # Number of chunks to retrieve (more = better context but slower answers)
 HYBRID_SEARCH_ENABLED = True  # Enable hybrid search (semantic + keyword)
 KEYWORD_WEIGHT = 0.2  # Weight for keyword search in hybrid (favor semantic)
 
@@ -45,7 +46,21 @@ KEYWORD_WEIGHT = 0.2  # Weight for keyword search in hybrid (favor semantic)
 # Persian answers instead of copied fragments. Set USE_GENERATIVE = False to fall
 # back to the lightweight extractive model.
 USE_GENERATIVE = True
-GENERATIVE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"  # multilingual, good Persian, fits in 8GB on MPS/CPU
+# Answer engine backend:
+#   "llama.cpp"    — quantized 4-bit GGUF model, 2-4x faster on CPU, ~4x less
+#                    RAM (recommended; needs the llama-cpp-python package,
+#                    falls back to "transformers" automatically if missing)
+#   "transformers" — full-precision HuggingFace model
+GENERATIVE_BACKEND = "llama.cpp"
+GENERATIVE_GGUF_REPO = "Qwen/Qwen2.5-1.5B-Instruct-GGUF"
+GENERATIVE_GGUF_FILE = "*q4_k_m.gguf"
+# transformers-backend model. 1.5B: reliable, fluent Persian answers. The 0.5B
+# variant is ~3x faster but noticeably less accurate.
+GENERATIVE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"  # fast option: "Qwen/Qwen2.5-0.5B-Instruct"
+GENERATIVE_MAX_NEW_TOKENS = 350  # cap on answer length (tokens); lower = faster
+# Reading the context (prefill) dominates answer latency on CPU: ~42 tok/s,
+# and Persian is token-dense (~0.45 tok/char). 2200 chars ≈ 1000 tokens ≈ 24s.
+GENERATIVE_MAX_CONTEXT_CHARS = 2200
 QA_MODEL = "mrm8488/bert-multi-cased-finetuned-xquadv1"  # extractive fallback (USE_GENERATIVE=False)
 MAX_CONTEXT_LENGTH = 1024  # Maximum context length for QA model (increased)
 MAX_ANSWER_LENGTH = 200  # Maximum answer length (increased)
