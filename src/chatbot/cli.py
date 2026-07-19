@@ -111,6 +111,24 @@ def ask(
 
 @app.command()
 @_friendly_errors
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind to."),
+    port: int = typer.Option(8000, "--port", "-p", help="Port to listen on."),
+) -> None:
+    """Start the REST API server (docs at http://<host>:<port>/docs)."""
+    import uvicorn
+
+    # Pass the app object (not an import string) so this also works from a
+    # source checkout via `python main.py serve`, where the package isn't
+    # installed and only main.py's sys.path tweak makes `chatbot` importable.
+    from .api import app as api_app
+
+    print(f"🚀 Starting ChatBotMM API on http://{host}:{port}  (docs: /docs)")
+    uvicorn.run(api_app, host=host, port=port)
+
+
+@app.command()
+@_friendly_errors
 def cli(
     skip_install: bool = typer.Option(
         False, "--skip-install", help="Skip the dependency-install step."
@@ -121,7 +139,7 @@ def cli(
 
     Each step is skipped if it's already done, so it's safe to re-run.
     """
-    print("🚀 ChatBotMM setup\n")
+    print("🚀 ChatBot setup\n")
 
     # 1) Ensure dependencies are installed (may re-exec the process), plus the
     # optional fast backend (best-effort, never fails the bootstrap).
