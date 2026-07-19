@@ -25,6 +25,11 @@ class _StubGen:
 @pytest.fixture
 def stub_generative(monkeypatch):
     monkeypatch.setattr(pipeline_module, "GenerativeQA", _StubGen)
+    # Force the transformers backend so the stub is used instead of a real
+    # GGUF model load through the llama.cpp backend.
+    from chatbot import config as config_module
+
+    monkeypatch.setattr(config_module, "GENERATIVE_BACKEND", "transformers")
 
 
 # --- CLI surface ---------------------------------------------------------
