@@ -6,26 +6,68 @@ faiss) are deferred until inside each command so that the `cli` bootstrap
 command can install dependencies *before* they are needed.
 """
 
+import functools
 import logging
 from pathlib import Path
-from typing import Optional
 
 import typer
 
+# WARNING by default so import-time INFO chatter (faiss, transformers, …)
+# never reaches users; commands print their own friendly output instead.
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(
     add_completion=False,
-    no_args_is_help=True,
+    pretty_exceptions_enable=False,
     help="ChatBotMM — a fully local Persian/English RAG document chatbot.",
 )
 
 
+def _friendly_errors(fn):
+    """Last-resort handler: turn any unhandled exception into a short
+    human-readable message instead of a traceback."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except (KeyboardInterrupt, EOFError):
+            print("\n👋 Cancelled.")
+            raise typer.Exit(code=130) from None
+        except (typer.Exit, typer.Abort):
+            raise
+        except SystemExit:
+            raise
+        except Exception as e:  # noqa: BLE001 - user-facing boundary
+            try:
+                # errors.py is dependency-light, but guard anyway: never let
+                # the error reporter itself crash with a traceback.
+                from .errors import print_friendly_error
+
+                print_friendly_error(e)
+            except Exception:  # noqa: BLE001
+                print(f"❌ Error: {e}")
+            raise typer.Exit(code=1) from None
+
+    return wrapper
+
+
+@app.callback(invoke_without_command=True)
+@_friendly_errors
+def _default(ctx: typer.Context) -> None:
+    """Run `chatbot` with no command to chat interactively."""
+    if ctx.invoked_subcommand is None:
+        from . import commands
+
+        commands.interactive_qa()
+
+
 @app.command()
+@_friendly_errors
 def index(
     force: bool = typer.Option(
         False, "--force", "-f", help="Force rebuild (delete the existing index)."
@@ -38,17 +80,19 @@ def index(
 
 
 @app.command()
+@_friendly_errors
 def rebuild() -> None:
     """Rebuild the index from scratch (alias for `index --force`)."""
     from . import commands
 
     commands.index_documents(force_reindex=True)
-    logger.info("✅ Index rebuilt. Use 'chatbot ask' to ask questions.")
+    commands.console.print("Use [bold]chatbot ask[/bold] to ask questions.")
 
 
 @app.command()
+@_friendly_errors
 def ask(
-    question: Optional[str] = typer.Argument(
+    question: str | None = typer.Argument(
         None, help="Question to ask. Omit to start interactive mode."
     ),
     context: bool = typer.Option(
@@ -66,6 +110,7 @@ def ask(
 
 
 @app.command()
+@_friendly_errors
 def cli(
     skip_install: bool = typer.Option(
         False, "--skip-install", help="Skip the dependency-install step."
@@ -78,25 +123,20 @@ def cli(
     """
     print("🚀 ChatBotMM setup\n")
 
-    # 1) Ensure dependencies are installed (may re-exec the process).
+    # 1) Ensure dependencies are installed (may re-exec the process), plus the
+    # optional fast backend (best-effort, never fails the bootstrap).
     if not skip_install:
-        from .bootstrap import ensure_dependencies
+        from .bootstrap import ensure_dependencies, ensure_optional_dependencies
 
         requirements = Path(__file__).resolve().parent.parent.parent / "requirements.txt"
         ensure_dependencies(requirements)
+        ensure_optional_dependencies()
 
     # Import the heavy logic only after deps are guaranteed present.
     from . import commands
 
-    # 2) Build the index if it doesn't exist yet.
-    if commands.is_indexed():
-        print("✅ Index already exists — skipping indexing.\n")
-    else:
-        print("📚 No index found — indexing documents...\n")
-        commands.index_documents()
-        print()
-
-    # 3) Drop into interactive chat.
+    # 2+3) interactive_qa handles the rest: staged model loading with status
+    # output, indexing when no index exists, then the chat loop.
     commands.interactive_qa()
 
 
