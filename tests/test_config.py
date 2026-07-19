@@ -1,6 +1,5 @@
 """Tests that config paths resolve to the project-root data/ directory."""
 
-from pathlib import Path
 
 from chatbot import config
 
