@@ -1,5 +1,7 @@
 """Tests for the Typer CLI and the dependency bootstrap logic."""
 
+import re
+
 import pytest
 from typer.testing import CliRunner
 
@@ -8,6 +10,17 @@ from chatbot.cli import app
 from chatbot.rag import pipeline as pipeline_module
 
 runner = CliRunner()
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(text: str) -> str:
+    """Strip ANSI color codes and collapse whitespace.
+
+    In CI, rich detects GitHub Actions and emits colored, line-wrapped help
+    output — a raw substring check on option names breaks there.
+    """
+    return re.sub(r"\s+", "", _ANSI.sub("", text))
 
 
 class _StubGen:
@@ -38,14 +51,15 @@ def stub_generative(monkeypatch):
 def test_help_lists_all_commands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
+    plain = _plain(result.stdout)
     for cmd in ("index", "rebuild", "ask", "cli"):
-        assert cmd in result.stdout
+        assert cmd in plain
 
 
 def test_cli_command_help_mentions_bootstrap():
     result = runner.invoke(app, ["cli", "--help"])
     assert result.exit_code == 0
-    assert "--skip-install" in result.stdout
+    assert "--skip-install" in _plain(result.stdout)
 
 
 from chatbot import config  # noqa: E402
