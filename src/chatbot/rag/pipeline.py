@@ -7,7 +7,7 @@ import logging
 import time
 from pathlib import Path
 
-from .chunker import TextChunker, normalize_persian
+from .chunker import TextChunker, expand_fragment, formalize_question, normalize_persian
 from .embeddings import EmbeddingGenerator
 from .extractive_qa import ExtractiveQA
 from .generative_qa import GenerativeQA
@@ -21,6 +21,51 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+class _RefusalGate:
+    """Stream buffer that holds text back until it's clearly not a refusal.
+
+    Small models sometimes answer "در سند اطلاعاتی پیدا نشد" even when the
+    context contains the answer. The pipeline retries those (see ask()), but
+    with streaming the refusal text would already be on the user's screen —
+    so pieces are buffered while they are still a prefix of the refusal
+    sentence, and only streamed once they diverge from it.
+    """
+
+    _REFUSAL = "در سند اطلاعاتی پیدا نشد"
+
+    def __init__(self, callback):
+        self.callback = callback
+        self.buffer = ""
+        self.streaming = False
+        self.suppressed = False
+
+    def __call__(self, piece: str) -> None:
+        if self.suppressed:
+            return
+        if self.streaming:
+            self.callback(piece)
+            return
+        self.buffer += piece
+        probe = self.buffer.strip()
+        if len(probe) < len(self._REFUSAL):
+            if self._REFUSAL.startswith(probe):
+                return  # still ambiguous — keep buffering
+        elif probe.startswith(self._REFUSAL):
+            self.suppressed = True  # it IS the refusal — never show it
+            return
+        # Diverged from the refusal sentence: it's a real answer.
+        self.streaming = True
+        self.callback(self.buffer)
+        self.buffer = ""
+
+    def finish(self) -> None:
+        """Flush a short buffered non-refusal answer at the end."""
+        if not self.streaming and not self.suppressed and self.buffer:
+            self.streaming = True
+            self.callback(self.buffer)
+            self.buffer = ""
 
 
 class RAGPipeline:
@@ -265,6 +310,11 @@ class RAGPipeline:
 
         logger.info(f"Processing question: {question}")
 
+        # Colloquial forms ("هارو", "چیه") reliably confuse small models into
+        # refusing even with the answer in context; formalize first, and turn
+        # bare noun-phrase fragments into explicit requests.
+        question = expand_fragment(formalize_question(question))
+
         # Retrieve relevant chunks
         search_started = time.time()
         retrieved = self.retriever.retrieve(question, top_k=self.top_k)
@@ -302,18 +352,59 @@ class RAGPipeline:
             # Only pass stream_callback when set, so stubs/tests with the plain
             # (question, chunks) signature keep working.
             if stream_callback is not None:
-                qa_result = self.qa.answer(question, chunks_list, stream_callback=stream_callback)
+                gate = _RefusalGate(stream_callback)
+                qa_result = self.qa.answer(question, chunks_list, stream_callback=gate)
             else:
+                gate = None
                 qa_result = self.qa.answer(question, chunks_list)
+
+            # False-refusal retry: "not found" despite a strong retrieval hit
+            # almost always means the model misread the question, not that the
+            # answer is missing. One retry with an explicit nudge fixes most
+            # of these (costs one extra generation only in this rare case).
+            top_score = retrieved[0][1] if retrieved else 0.0
+            refusal_marker = "پیدا نشد"
+            if refusal_marker in qa_result.get("answer", "") and top_score >= 0.55:
+                logger.info("Refusal despite strong retrieval — retrying with a nudge")
+                nudged = (
+                    f"{question}\n"
+                    "(اطلاعات مرتبط با این سؤال در متن زمینه وجود دارد؛ "
+                    "آن را از متن استخراج کن.)"
+                )
+                retry_gate = _RefusalGate(stream_callback) if stream_callback else None
+                # verbatim=True: refusals often happen because the answer must
+                # be quoted token-for-token (JSON samples, tables) and the
+                # repetition penalty fights exactly that.
+                if retry_gate is not None:
+                    retry_result = self.qa.answer(
+                        nudged, chunks_list, stream_callback=retry_gate, verbatim=True
+                    )
+                else:
+                    retry_result = self.qa.answer(nudged, chunks_list, verbatim=True)
+                if refusal_marker not in retry_result.get("answer", ""):
+                    qa_result = retry_result
+                    gate = retry_gate
+            if gate is not None and refusal_marker not in qa_result.get("answer", ""):
+                gate.finish()
         else:
             qa_result = self.qa.extract_from_chunks(question, chunks_list)
 
         logger.info(f"QA result - Score: {qa_result['score']:.3f}, Answer length: {len(qa_result.get('answer', ''))}")
 
+        # Heuristic confidence from retrieval quality: the generative model
+        # has no calibrated self-confidence, but the similarity score of the
+        # best retrieved chunk tracks answer reliability well in practice
+        # (>=0.8 almost always right, <0.4 usually nothing relevant found).
+        confidence: int | None = None
+        if retrieved and "پیدا نشد" not in qa_result.get("answer", ""):
+            top = retrieved[0][1]
+            confidence = round(min(max((top - 0.30) / (0.85 - 0.30), 0.0), 1.0) * 80 + 15)
+
         # Prepare response
         response = {
             "answer": qa_result["answer"],
             "score": qa_result["score"],
+            "confidence": confidence,
             "source_chunks": qa_result.get("source_chunks", []),
             "timings": {
                 "search_s": search_seconds,
