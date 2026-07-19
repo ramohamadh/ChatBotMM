@@ -15,7 +15,7 @@ questions using a **local generative LLM** — producing fluent, natural answers
 - **Multilingual Embeddings**: `paraphrase-multilingual-MiniLM-L12-v2` (50+ languages incl. Persian)
 - **Vector Storage**: FAISS with save/load and incremental updates
 - **Hybrid Retrieval**: Semantic + keyword search
-- **Generative Answers**: Local instruction-tuned LLM (`Qwen2.5-1.5B-Instruct`) writes fluent Persian — not just copied fragments. An extractive fallback is also available.
+- **Generative Answers**: Local instruction-tuned LLM (`Qwen2.5-0.5B-Instruct` by default, fast on CPU) writes fluent Persian — not just copied fragments, streamed live into the terminal. An extractive fallback is also available.
 - **Packaged**: `src/` layout, `pyproject.toml`, console entrypoint, and tests
 
 ## Installation
@@ -48,7 +48,7 @@ Or run the individual commands:
 chatbot index
 
 # 2. Ask questions (Persian or English)
-chatbot ask                                  # interactive
+chatbot                                      # interactive chat (type questions, 'quit' to stop)
 chatbot ask "این سند درباره چیست؟"           # single question
 chatbot ask "What is this about?" --context  # include retrieved chunks
 
@@ -67,12 +67,29 @@ chatbot rebuild        # or: chatbot index --force
 
 | Command | What it does |
 | --- | --- |
+| `chatbot` | Interactive chat — ask as many questions as you like in one session. |
 | `chatbot cli` | One-shot bootstrap: install deps → index → chat (each step skipped if done). Use `--skip-install` to skip the install step. |
 | `chatbot index` | Index `data/docs/` into the vector store. `--force` / `-f` rebuilds. |
 | `chatbot rebuild` | Rebuild the index from scratch (alias for `index --force`). |
 | `chatbot ask [QUESTION]` | Ask a question; omit `QUESTION` for interactive mode. `--context` / `-c` shows the retrieved chunks. |
 
 Run `chatbot --help` or `chatbot <command> --help` for full details.
+
+## Docker
+
+```bash
+# build (or pull the image published by CI: ghcr.io/<owner>/<repo>)
+docker build -t chatbotmm .
+
+# copy your documents into the data volume, then chat
+docker run --rm -v chatbot-data:/data -v ./data/docs:/src alpine sh -c "mkdir -p /data/docs && cp -r /src/. /data/docs/"
+docker run -it -v chatbot-data:/data chatbotmm
+```
+
+All persistent state (documents, index, downloaded models) lives in the
+`chatbot-data` volume; models (~2 GB) download once on first run.
+CI (GitHub Actions) lints, tests, and publishes the image to GHCR on every
+push to `main` — see [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 ## Usage in Python
 
@@ -122,7 +139,8 @@ print(f"Sources: {len(response['source_chunks'])} chunks")
 Edit [src/chatbot/config.py](src/chatbot/config.py):
 
 - `USE_GENERATIVE` — `True` (default) for fluent generated answers; `False` for the extractive fallback
-- `GENERATIVE_MODEL` — default `Qwen/Qwen2.5-1.5B-Instruct`; use `Qwen/Qwen2.5-0.5B-Instruct` on low-RAM machines
+- `GENERATIVE_MODEL` — default `Qwen/Qwen2.5-0.5B-Instruct` (fast CPU answers); switch to `Qwen/Qwen2.5-1.5B-Instruct` for higher quality (~3x slower on CPU)
+- `GENERATIVE_MAX_NEW_TOKENS`, `GENERATIVE_MAX_CONTEXT_CHARS` — answer length / context size caps (lower = faster)
 - `EMBEDDING_MODEL`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, `TOP_K`, hybrid-search weights
 
 Data locations can be overridden with environment variables:
@@ -140,7 +158,7 @@ Data locations can be overridden with environment variables:
 ## Models
 
 - **Embeddings**: `paraphrase-multilingual-MiniLM-L12-v2` (384-d, 50+ languages)
-- **Generation**: `Qwen/Qwen2.5-1.5B-Instruct` (multilingual, good Persian)
+- **Generation**: `Qwen/Qwen2.5-0.5B-Instruct` (multilingual, fast on CPU; `1.5B` optional for quality)
 - **Extractive fallback**: `mrm8488/bert-multi-cased-finetuned-xquadv1`
 
 Models download automatically on first use and are cached in `~/.cache/huggingface/`.
