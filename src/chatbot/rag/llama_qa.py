@@ -67,8 +67,15 @@ class LlamaGenerativeQA:
         question: str,
         chunks: list[dict],
         stream_callback: Callable[[str], None] | None = None,
+        verbatim: bool = False,
     ) -> dict:
-        """Generate an answer grounded in `chunks`; optionally stream pieces."""
+        """Generate an answer grounded in `chunks`; optionally stream pieces.
+
+        verbatim=True disables the repetition penalty: quoting a JSON sample
+        or a table from the context repeats tokens heavily, and the penalty
+        makes the model refuse rather than copy. Used by the pipeline's
+        false-refusal retry.
+        """
         if not chunks:
             return {"answer": NO_ANSWER_TEXT, "score": 0.0, "source_chunks": []}
 
@@ -82,7 +89,7 @@ class LlamaGenerativeQA:
             max_tokens=self.max_new_tokens,
             temperature=TEMPERATURE,
             top_p=TOP_P,
-            repeat_penalty=REPETITION_PENALTY,
+            repeat_penalty=1.0 if verbatim else REPETITION_PENALTY,
         )
 
         if stream_callback is not None:
