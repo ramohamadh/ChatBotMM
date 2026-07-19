@@ -4,7 +4,6 @@ Implements smart chunking with overlap and metadata preservation.
 """
 
 import logging
-from typing import List, Dict, Optional
 import re
 
 logger = logging.getLogger(__name__)
@@ -44,29 +43,29 @@ def normalize_persian(text: str) -> str:
 
 class TextChunker:
     """Handles text chunking with overlap and metadata."""
-    
+
     def __init__(self, chunk_size: int = 512, chunk_overlap: int = 50):
         """
         Initialize the text chunker.
-        
+
         Args:
             chunk_size: Maximum size of each chunk in characters
             chunk_overlap: Number of characters to overlap between chunks
         """
         if chunk_overlap >= chunk_size:
             raise ValueError("chunk_overlap must be less than chunk_size")
-        
+
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-    
-    def chunk_text(self, text: str, metadata: Optional[Dict] = None) -> List[Dict]:
+
+    def chunk_text(self, text: str, metadata: dict | None = None) -> list[dict]:
         """
         Split text into chunks with overlap and metadata.
-        
+
         Args:
             text: The text to chunk
             metadata: Optional metadata dictionary to attach to each chunk
-            
+
         Returns:
             List of chunk dictionaries, each containing:
             - text: The chunk text
@@ -75,30 +74,75 @@ class TextChunker:
         """
         if not text.strip():
             return []
-        
+
         # Clean and normalize text
         text = self._clean_text(text)
-        
+
+        # Split at section headings first so each chunk stays on one topic;
+        # the sliding window below then only runs *within* a section.
+        chunks = []
+        chunk_id = 0
+        for section in self._split_sections(text):
+            section_chunks, chunk_id = self._chunk_block(section, metadata, chunk_id)
+            chunks.extend(section_chunks)
+
+        logger.debug(f"Created {len(chunks)} chunks from text of length {len(text)}")
+        return chunks
+
+    # Numbered section headings like "1- هدف", "5-1 صورتحساب اصلی" or
+    # "3-8-2 نمونه Json" at the start of a line.
+    _SECTION_HEADING = re.compile(r"^\s*\d+(?:[-–]\d+){0,3}[-–]?\s+\S.{0,120}$")
+    # Sections shorter than this get merged with their neighbor (avoids
+    # confetti chunks from tables of contents).
+    _MIN_SECTION_CHARS = 250
+
+    def _split_sections(self, text: str) -> list[str]:
+        """Split text at section headings; merge tiny fragments."""
+        sections: list[str] = []
+        current: list[str] = []
+        for line in text.splitlines():
+            if self._SECTION_HEADING.match(line) and current:
+                sections.append("\n".join(current))
+                current = [line]
+            else:
+                current.append(line)
+        if current:
+            sections.append("\n".join(current))
+
+        if len(sections) <= 1:
+            return [text]
+
+        merged: list[str] = []
+        for section in sections:
+            if merged and (len(merged[-1]) < self._MIN_SECTION_CHARS or len(section) < self._MIN_SECTION_CHARS):
+                merged[-1] = merged[-1] + "\n" + section
+            else:
+                merged.append(section)
+        return merged
+
+    def _chunk_block(
+        self, text: str, metadata: dict | None, chunk_id: int
+    ) -> tuple[list[dict], int]:
+        """Sliding-window chunking of one block; returns (chunks, next_chunk_id)."""
         chunks = []
         start = 0
-        chunk_id = 0
-        
+
         while start < len(text):
             # Calculate end position
             end = start + self.chunk_size
-            
+
             # If not the last chunk, try to break at sentence boundary
             if end < len(text):
                 # Look for sentence endings within the last 20% of the chunk
                 search_start = max(start, end - int(self.chunk_size * 0.2))
                 sentence_end = self._find_sentence_boundary(text, search_start, end)
-                
+
                 if sentence_end > start:
                     end = sentence_end
-            
+
             # Extract chunk text
             chunk_text = text[start:end].strip()
-            
+
             if chunk_text:
                 # Create chunk metadata
                 chunk_metadata = (metadata.copy() if metadata else {})
@@ -108,20 +152,19 @@ class TextChunker:
                     "chunk_end": end,
                     "chunk_length": len(chunk_text)
                 })
-                
+
                 chunks.append({
                     "text": chunk_text,
                     "metadata": chunk_metadata
                 })
-                
+
                 chunk_id += 1
-            
+
             # Move start position with overlap
             start = end - self.chunk_overlap if end < len(text) else end
-        
-        logger.debug(f"Created {len(chunks)} chunks from text of length {len(text)}")
-        return chunks
-    
+
+        return chunks, chunk_id
+
     def _clean_text(self, text: str) -> str:
         """Clean and normalize text while preserving paragraph breaks."""
         text = normalize_persian(text)
@@ -132,46 +175,46 @@ class TextChunker:
         # Normalize newline groups to at most two
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
-    
+
     def _find_sentence_boundary(self, text: str, start: int, end: int) -> int:
         """
         Find the best sentence boundary within the given range.
-        
+
         Args:
             text: The full text
             start: Start position to search from
             end: End position to search to
-            
+
         Returns:
             Position of sentence boundary, or end if not found
         """
         # Look for sentence endings: . ! ? ؟ (Persian) followed by space or newline
         pattern = r'[.!?؟…]\s+'
         matches = list(re.finditer(pattern, text[start:end]))
-        
+
         if matches:
             # Use the last match before the end
             last_match = matches[-1]
             return start + last_match.end()
-        
+
         return end
-    
-    def chunk_documents(self, documents: List[tuple]) -> List[Dict]:
+
+    def chunk_documents(self, documents: list[tuple]) -> list[dict]:
         """
         Chunk multiple documents.
-        
+
         Args:
             documents: List of (text, metadata) tuples
-            
+
         Returns:
             List of all chunks from all documents
         """
         all_chunks = []
-        
+
         for text, metadata in documents:
             chunks = self.chunk_text(text, metadata)
             all_chunks.extend(chunks)
-        
+
         logger.info(f"Created {len(all_chunks)} total chunks from {len(documents)} documents")
         return all_chunks
 
