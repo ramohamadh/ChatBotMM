@@ -145,8 +145,8 @@ class TextChunker:
         Returns:
             Position of sentence boundary, or end if not found
         """
-        # Look for sentence endings: . ! ? followed by space or newline
-        pattern = r'[.!?]\s+'
+        # Look for sentence endings: . ! ? ؟ (Persian) followed by space or newline
+        pattern = r'[.!?؟…]\s+'
         matches = list(re.finditer(pattern, text[start:end]))
         
         if matches:
