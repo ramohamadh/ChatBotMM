@@ -189,8 +189,8 @@ def ask_single_question(question: str, return_context: bool = False) -> dict:
         console.print("⚠️  No index found — indexing documents first…")
         index_documents(rag=rag)
 
-    with console.status("[cyan]🤔 Thinking…[/cyan]", spinner="dots"):
-        return rag.ask(question, return_context=return_context)
+    console.print(Text("🔍 Searching & thinking…", style="dim yellow"))
+    return rag.ask(question, return_context=return_context)
 
 
 def _flush_typeahead() -> None:
@@ -310,6 +310,20 @@ def _print_suggestions(rag: RAGPipeline) -> None:
     console.print()
 
 
+def _print_confidence(response: dict) -> None:
+    """Retrieval-based confidence: how well the documents matched the question."""
+    confidence = response.get("confidence")
+    if confidence is None:
+        return
+    if confidence >= 70:
+        icon, style = "🟢", "green"
+    elif confidence >= 40:
+        icon, style = "🟡", "yellow"
+    else:
+        icon, style = "🔴", "red"
+    console.print(Text(f"{icon} Confidence: {confidence}%", style=style))
+
+
 def _print_timings(response: dict, total_s: float) -> None:
     timings = response.get("timings", {})
     parts = []
@@ -424,28 +438,21 @@ def interactive_qa(rag: RAGPipeline | None = None) -> None:
                     console.print()
                     continue
 
-                # Spinner while retrieving/prefilling; it stops the moment the
-                # first streamed word arrives. The answer itself streams
-                # append-only: no cursor repainting, which renders correctly in
-                # every terminal (Live repaints break on RTL text in PyCharm).
+                # Static "thinking" line, then append-only streaming: no
+                # cursor repainting at all, which renders correctly in every
+                # terminal (animated spinners and Live repaints leave stale
+                # lines in e.g. PyCharm's terminal).
                 started = time.time()
-                status = console.status("[yellow]🔍 Searching documents…[/yellow]", spinner="dots")
-                status.start()
+                console.print(Text("🔍 Searching & thinking…", style="dim yellow"))
                 streaming = [False]
 
-                def _on_piece(
-                    piece: str, _status=status, _streaming=streaming
-                ) -> None:
+                def _on_piece(piece: str, _streaming=streaming) -> None:
                     if not _streaming[0]:
                         _streaming[0] = True
-                        _status.stop()
                         console.print("\n[bold blue]🤖 ChatBot[/bold blue]")
                     print(piece, end="", flush=True)
 
-                try:
-                    response = rag.ask(question, return_context=True, stream_callback=_on_piece)
-                finally:
-                    status.stop()
+                response = rag.ask(question, return_context=True, stream_callback=_on_piece)
 
                 if streaming[0]:
                     print(flush=True)  # finish the streamed block
@@ -456,6 +463,7 @@ def interactive_qa(rag: RAGPipeline | None = None) -> None:
                     console.print(Text(response["answer"]))
                 console.print()
                 _print_answer(response, panel=False)
+                _print_confidence(response)
                 _print_timings(response, time.time() - started)
                 history.append(question)
                 last_response = response
