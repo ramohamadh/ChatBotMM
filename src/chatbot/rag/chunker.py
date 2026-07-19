@@ -5,6 +5,7 @@ Implements smart chunking with overlap and metadata preservation.
 
 import logging
 import re
+import unicodedata
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +36,70 @@ def normalize_persian(text: str) -> str:
     """
     if not text:
         return text
+    # Some PDFs extract Persian as Arabic *presentation form* codepoints
+    # (U+FB50–U+FEFC): they render identically but never match regular
+    # letters in search or reading. NFKC folds them back to base letters.
+    text = unicodedata.normalize("NFKC", text)
     for src, dst in _PERSIAN_CHAR_MAP.items():
         text = text.replace(src, dst)
     text = _PERSIAN_DIACRITICS.sub('', text)
     return text
+
+
+# Colloquial -> formal Persian, applied to user QUESTIONS only (never indexed
+# text). Small instruction-tuned models frequently misread colloquial forms
+# ("هارو", "چیه") and answer "not found" even when the context holds the
+# answer; formal phrasing is far more reliable. Whole-word replacements only.
+_COLLOQUIAL_MAP = {
+    "هارو": "ها را",
+    "بهم": "به من",
+    "چیه": "چیست",
+    "جیه": "چیست",
+    "کیه": "کیست",
+    "کدوم": "کدام",
+    "چطوری": "چگونه",
+    "میشه": "می‌شود",
+    "نمیشه": "نمی‌شود",
+    "اینا": "این‌ها",
+    "چیا": "چه چیزهایی",
+    "بگو": "بیان کن",
+}
+_COLLOQUIAL_RE = re.compile(
+    r"(?<![\w؀-ۿ])(" + "|".join(map(re.escape, _COLLOQUIAL_MAP)) + r")(?![\w؀-ۿ])"
+)
+
+
+def formalize_question(question: str) -> str:
+    """Rewrite common colloquial Persian forms into formal ones."""
+    if not question:
+        return question
+    return _COLLOQUIAL_RE.sub(lambda m: _COLLOQUIAL_MAP[m.group(1)], question)
+
+
+# Words that mark a proper question or request. A short input without any of
+# these is a bare fragment like "نمونه پاسخ ناموفق" — small models don't treat
+# fragments as requests and answer "not found".
+_REQUEST_MARKERS = (
+    "چیست", "کیست", "چگونه", "آیا", "کدام", "چند", "چرا", "کجا", "چه",
+    "است", "هست", "هستند", "بده", "کن", "بگو", "بنویس", "بیان",
+    "؟", "?",
+    "what", "how", "why", "which", "list", "show", "give", "explain",
+)
+
+
+def expand_fragment(question: str) -> str:
+    """Turn a bare noun-phrase input into an explicit request.
+
+    "نمونه پاسخ ناموفق" -> "نمونه پاسخ ناموفق را از متن زمینه نشان بده".
+    Questions that already contain a request marker are left untouched.
+    """
+    stripped = question.strip()
+    if not stripped or len(stripped.split()) > 6:
+        return question
+    lowered = stripped.lower()
+    if any(marker in lowered for marker in _REQUEST_MARKERS):
+        return question
+    return f"{stripped} را از متن زمینه نشان بده"
 
 
 class TextChunker:
