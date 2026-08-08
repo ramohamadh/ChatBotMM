@@ -43,3 +43,25 @@ def test_chunker_rejects_bad_overlap():
 
     with pytest.raises(ValueError):
         TextChunker(chunk_size=100, chunk_overlap=100)
+
+
+def test_expand_identifier_question_rewrites_bare_id():
+    from chatbot.rag.chunker import expand_identifier_question
+
+    out = expand_identifier_question("ins چیست")
+    assert "ins" in out
+    assert "تعریف" in out  # explicit definition request
+    # With the optional "فیلد" prefix and question mark too.
+    out2 = expand_identifier_question("فیلد tinb چیست؟")
+    assert "tinb" in out2 and "تعریف" in out2
+
+
+def test_expand_identifier_question_leaves_normal_questions():
+    from chatbot.rag.chunker import expand_identifier_question
+
+    for q in (
+        "موضوع صورتحساب چیست؟",          # Persian subject, not a Latin id
+        "ins در کجا استفاده می‌شود؟",     # id but a different question shape
+        "what is the ins field for?",     # English sentence, not the bare shape
+    ):
+        assert expand_identifier_question(q) == q

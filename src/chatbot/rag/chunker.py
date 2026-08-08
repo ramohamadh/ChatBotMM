@@ -87,6 +87,29 @@ _REQUEST_MARKERS = (
 )
 
 
+# "ins چیست" — a bare Latin identifier plus "what is". Small models answer
+# these with a single copied fragment ("اجباری") because the question doesn't
+# say WHAT about the identifier to report, and the matching context (a table
+# row, a code sample) is terse. Rewriting into an explicit request to gather
+# everything the context says about the identifier fixes that — without
+# assuming what kind of thing the identifier is (field, code, endpoint, …).
+_IDENTIFIER_QUESTION_RE = re.compile(
+    r"^\s*(?:فیلد\s+)?([A-Za-z][A-Za-z0-9_]{1,15})\s+(?:چیست|یعنی چه|یعنی چی)\s*؟?\s*$"
+)
+
+
+def expand_identifier_question(question: str) -> str:
+    """Rewrite "<latin-id> چیست" into an explicit definition request."""
+    m = _IDENTIFIER_QUESTION_RE.match(question)
+    if not m:
+        return question
+    ident = m.group(1)
+    return (
+        f"{ident} چیست؟ تعریف {ident} و تمام اطلاعاتی را که "
+        "متن زمینه درباره‌ی آن می‌دهد بیان کن."
+    )
+
+
 def expand_fragment(question: str) -> str:
     """Turn a bare noun-phrase input into an explicit request.
 

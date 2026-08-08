@@ -48,6 +48,8 @@ def test_ask_routes_to_generative_and_shapes_response(stub_generative):
         # Force the transformers backend so the stubbed GenerativeQA is used
         # (the llama.cpp backend would load a real GGUF model).
         generative_backend="transformers",
+        # Never download/load the real cross-encoder in tests.
+        rerank_enabled=False,
     )
     assert rag.use_generative is True
     assert type(rag.qa).__name__ == "_StubGen"

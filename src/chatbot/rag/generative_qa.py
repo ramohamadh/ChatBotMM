@@ -72,8 +72,52 @@ def build_user_prompt(question: str, context: str) -> str:
     return f"متن زمینه:\n{context}\n\nسؤال: {question}"
 
 
+def is_looping(text: str, tail_chars: int = 120) -> bool:
+    """True when generation has started repeating itself verbatim.
+
+    Small models loop at low temperature — especially in verbatim mode, where
+    the repetition penalty is intentionally off. If the latest `tail_chars`
+    of the text already appeared earlier, the model is cycling and nothing
+    new will come out; callers can stop generating.
+    """
+    if len(text) < tail_chars * 2:
+        return False
+    return text[-tail_chars:] in text[: -tail_chars]
+
+
+def truncate_loop(answer: str) -> str:
+    """Cut a generated answer at the first repeated paragraph.
+
+    Keeps the first occurrence of every substantial paragraph; everything
+    from the first repeat onward is dropped (a looping model never adds new
+    content after it starts repeating).
+    """
+    seen: set[str] = set()
+    kept: list[str] = []
+    truncated = False
+    for paragraph in answer.split("\n"):
+        key = " ".join(paragraph.split())
+        if len(key) > 30:
+            if key in seen:
+                truncated = True
+                break
+            seen.add(key)
+        kept.append(paragraph)
+    # A cut usually leaves the repeat's lead-in sentence dangling
+    # ("... به صورت زیر بیان شده است:") — drop a trailing colon paragraph.
+    if truncated:
+        while kept:
+            tail = kept[-1].strip()
+            if not tail or tail.endswith((":", "：")):
+                kept.pop()
+                continue
+            break
+    return "\n".join(kept).strip()
+
+
 def make_result(answer: str, chunks: list[dict]) -> dict:
     """Shape the QA result dict shared by both backends."""
+    answer = truncate_loop(answer or "")
     return {
         "answer": answer or NO_ANSWER_TEXT,
         "score": 1.0,
@@ -95,6 +139,7 @@ class GenerativeQA:
         model_name: str = "Qwen/Qwen2.5-0.5B-Instruct",
         max_new_tokens: int = 300,
         max_context_chars: int = 3500,
+        temperature: float | None = None,
     ):
         """
         Initialize the generative QA model.
@@ -130,6 +175,7 @@ class GenerativeQA:
         self.model_name = model_name
         self.max_new_tokens = max_new_tokens
         self.max_context_chars = max_context_chars
+        self.temperature = TEMPERATURE if temperature is None else temperature
         logger.info("Generative QA model loaded successfully")
 
     def _build_context(self, chunks: list[dict], max_chars: int | None = None) -> str:
@@ -187,7 +233,7 @@ class GenerativeQA:
             # no_repeat_ngram forces it to mutate words into nonsense instead.
             # A low temperature breaks loops naturally while staying grounded.
             do_sample=True,
-            temperature=TEMPERATURE,
+            temperature=self.temperature,
             top_p=TOP_P,
             repetition_penalty=1.0 if verbatim else REPETITION_PENALTY,
             pad_token_id=self.tokenizer.eos_token_id,

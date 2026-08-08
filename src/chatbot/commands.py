@@ -63,12 +63,18 @@ def get_default_rag_pipeline() -> RAGPipeline:
         top_k=config.TOP_K,
         hybrid_search=config.HYBRID_SEARCH_ENABLED,
         keyword_weight=config.KEYWORD_WEIGHT,
+        rerank_enabled=config.RERANK_ENABLED,
+        rerank_model=config.RERANK_MODEL,
+        rerank_candidates=config.RERANK_CANDIDATES,
+        rerank_top_k=config.RERANK_TOP_K,
+        rerank_max_length=config.RERANK_MAX_LENGTH,
         embedding_model=config.EMBEDDING_MODEL,
         qa_model=config.QA_MODEL,
         use_generative=config.USE_GENERATIVE,
         generative_model=config.GENERATIVE_MODEL,
         generative_max_new_tokens=config.GENERATIVE_MAX_NEW_TOKENS,
         generative_max_context_chars=config.GENERATIVE_MAX_CONTEXT_CHARS,
+        generative_temperature=config.GENERATIVE_TEMPERATURE,
         generative_backend=config.GENERATIVE_BACKEND,
         generative_gguf_repo=config.GENERATIVE_GGUF_REPO,
         generative_gguf_file=config.GENERATIVE_GGUF_FILE,
@@ -157,6 +163,9 @@ def _print_answer(response: dict, show_context: bool = False, panel: bool = True
     if panel:
         console.print()
         console.print(_answer_panel(response["answer"]))
+        # Retrieval-based confidence (interactive mode prints its own after
+        # streaming; here the panel path covers one-shot `chatbot ask`).
+        _print_confidence(response)
     if not config.USE_GENERATIVE:
         console.print(f"🎯 Confidence: {response['score']:.2%}")
     if show_context and response.get("retrieved_chunks"):
@@ -247,7 +256,10 @@ def _load_pipeline_with_status() -> RAGPipeline:
         if config.GENERATIVE_BACKEND == "llama.cpp"
         else _hf_model_cached(config.GENERATIVE_MODEL)
     )
-    if not (_hf_model_cached(config.EMBEDDING_MODEL) and answer_model_cached):
+    # warm_up() also loads the reranker — its first-run download must not
+    # happen under the spinner either.
+    reranker_cached = (not config.RERANK_ENABLED) or _hf_model_cached(config.RERANK_MODEL)
+    if not (_hf_model_cached(config.EMBEDDING_MODEL) and answer_model_cached and reranker_cached):
         console.print(
             "[yellow]📚 Loading models… (the first run downloads them — progress below)[/yellow]"
         )

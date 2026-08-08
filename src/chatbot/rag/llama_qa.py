@@ -21,6 +21,7 @@ from .generative_qa import (
     TOP_P,
     build_context,
     build_user_prompt,
+    is_looping,
     make_result,
 )
 
@@ -38,6 +39,7 @@ class LlamaGenerativeQA:
         max_context_chars: int = 3500,
         n_ctx: int = 4096,
         n_batch: int = 2048,
+        temperature: float | None = None,
     ):
         """
         Args:
@@ -60,6 +62,7 @@ class LlamaGenerativeQA:
         )
         self.max_new_tokens = max_new_tokens
         self.max_context_chars = max_context_chars
+        self.temperature = TEMPERATURE if temperature is None else temperature
         logger.info("GGUF model loaded successfully")
 
     def answer(
@@ -87,16 +90,24 @@ class LlamaGenerativeQA:
         kwargs = dict(
             messages=messages,
             max_tokens=self.max_new_tokens,
-            temperature=TEMPERATURE,
+            temperature=self.temperature,
             top_p=TOP_P,
             repeat_penalty=1.0 if verbatim else REPETITION_PENALTY,
         )
 
         if stream_callback is not None:
             pieces: list[str] = []
+            text = ""
             for part in self.llm.create_chat_completion(stream=True, **kwargs):
                 piece = part["choices"][0].get("delta", {}).get("content")
                 if piece:
+                    text += piece
+                    # Stop the moment the model starts repeating itself —
+                    # the repeated text is never streamed to the user, and
+                    # cutting generation early also saves wall-clock time.
+                    if is_looping(text):
+                        logger.info("Generation loop detected — stopping early")
+                        break
                     pieces.append(piece)
                     stream_callback(piece)
             answer = "".join(pieces).strip()

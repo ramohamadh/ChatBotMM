@@ -7,7 +7,13 @@ import logging
 import time
 from pathlib import Path
 
-from .chunker import TextChunker, expand_fragment, formalize_question, normalize_persian
+from .chunker import (
+    TextChunker,
+    expand_fragment,
+    expand_identifier_question,
+    formalize_question,
+    normalize_persian,
+)
 from .embeddings import EmbeddingGenerator
 from .extractive_qa import ExtractiveQA
 from .generative_qa import GenerativeQA
@@ -89,10 +95,16 @@ class RAGPipeline:
         top_k: int = 5,
         hybrid_search: bool = True,
         keyword_weight: float = 0.3,
+        rerank_enabled: bool = True,
+        rerank_model: str = "BAAI/bge-reranker-v2-m3",
+        rerank_candidates: int = 12,
+        rerank_top_k: int = 4,
+        rerank_max_length: int = 320,
         use_generative: bool = True,
         generative_model: str = "Qwen/Qwen2.5-1.5B-Instruct",
         generative_max_new_tokens: int = 300,
         generative_max_context_chars: int = 3500,
+        generative_temperature: float | None = None,
         generative_backend: str = "llama.cpp",
         generative_gguf_repo: str = "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
         generative_gguf_file: str = "*q4_k_m.gguf",
@@ -140,11 +152,22 @@ class RAGPipeline:
         self._generative_model_name = generative_model
         self._generative_max_new_tokens = generative_max_new_tokens
         self._generative_max_context_chars = generative_max_context_chars
+        self._generative_temperature = generative_temperature
         self._generative_backend = generative_backend
         self._generative_gguf_repo = generative_gguf_repo
         self._generative_gguf_file = generative_gguf_file
         self._qa_model_name = qa_model
         self._qa = None
+
+        # Cross-encoder reranker: reads (question, chunk) pairs together and
+        # picks the truly relevant chunks out of a wide candidate set. Loaded
+        # lazily on first ask(), like the answer model.
+        self.rerank_enabled = rerank_enabled
+        self._rerank_model_name = rerank_model
+        self.rerank_candidates = rerank_candidates
+        self.rerank_top_k = rerank_top_k
+        self._rerank_max_length = rerank_max_length
+        self._reranker = None
 
         self.top_k = top_k
         self.is_indexed = False
@@ -179,6 +202,7 @@ class RAGPipeline:
                         filename=self._generative_gguf_file,
                         max_new_tokens=self._generative_max_new_tokens,
                         max_context_chars=self._generative_max_context_chars,
+                        temperature=self._generative_temperature,
                     )
                     return self._qa
                 except ImportError:
@@ -192,12 +216,33 @@ class RAGPipeline:
                 model_name=self._generative_model_name,
                 max_new_tokens=self._generative_max_new_tokens,
                 max_context_chars=self._generative_max_context_chars,
+                temperature=self._generative_temperature,
             )
         return self._qa
 
+    @property
+    def reranker(self):
+        """The cross-encoder reranker, created on first use (or None if disabled)."""
+        if not self.rerank_enabled:
+            return None
+        if self._reranker is None:
+            from .reranker import Reranker
+
+            try:
+                self._reranker = Reranker(
+                    model_name=self._rerank_model_name,
+                    max_length=self._rerank_max_length,
+                )
+            except Exception as e:  # noqa: BLE001 - reranking is an enhancement
+                logger.warning(f"Could not load reranker ({e}) — continuing without it")
+                self.rerank_enabled = False
+                return None
+        return self._reranker
+
     def warm_up(self) -> "RAGPipeline":
-        """Force-load the answer model now instead of on the first question."""
+        """Force-load the answer model (and reranker) now instead of on the first question."""
         _ = self.qa
+        _ = self.reranker
         return self
 
     # Words that signal a question about the document itself rather than its
@@ -223,6 +268,53 @@ class RAGPipeline:
             if len(bucket) < per_doc:
                 bucket.append(chunk)
         return [chunk for chunks in by_doc.values() for chunk in chunks]
+
+    def _with_neighbors(
+        self, results: list[tuple[dict, float]], max_anchors: int = 2
+    ) -> list[tuple[dict, float]]:
+        """Stitch each top chunk together with its physical neighbors.
+
+        Answers often straddle a chunk boundary (the 150-char overlap is not
+        always enough). For the best `max_anchors` results, the chunk stored
+        directly before/after them in the same document is inserted around
+        them, so the generator sees the full passage. The context char budget
+        in the answer engine still caps total size.
+        """
+        chunks = self.vectorstore.chunks
+        if not chunks or not results:
+            return results
+        position = {id(chunk): i for i, chunk in enumerate(chunks)}
+        seen_texts = {chunk["text"] for chunk, _ in results}
+        stitched: list[tuple[dict, float]] = []
+        for rank, (chunk, score) in enumerate(results):
+            group = [(chunk, score)]
+            i = position.get(id(chunk))
+            if rank < max_anchors and i is not None:
+                filename = chunk.get("metadata", {}).get("filename")
+
+                def usable(j: int, filename=filename) -> dict | None:
+                    if not 0 <= j < len(chunks):
+                        return None
+                    neighbor = chunks[j]
+                    if neighbor.get("metadata", {}).get("filename") != filename:
+                        return None
+                    if neighbor["text"] in seen_texts:
+                        return None
+                    return neighbor
+
+                # Anchor stays FIRST: small models weight the leading context
+                # chunk far more than the rest, and the anchor is the one the
+                # reranker actually scored. Neighbors follow — continuation
+                # (next) before predecessor (prev), since an answer cut off
+                # mid-chunk continues forward more often than backward.
+                if (nxt := usable(i + 1)) is not None:
+                    seen_texts.add(nxt["text"])
+                    group.append((nxt, score))
+                if (prev := usable(i - 1)) is not None:
+                    seen_texts.add(prev["text"])
+                    group.append((prev, score))
+            stitched.extend(group)
+        return stitched
 
     def index_documents(self, force_reindex: bool = False) -> dict:
         """
@@ -313,12 +405,40 @@ class RAGPipeline:
         # Colloquial forms ("هارو", "چیه") reliably confuse small models into
         # refusing even with the answer in context; formalize first, and turn
         # bare noun-phrase fragments into explicit requests.
-        question = expand_fragment(formalize_question(question))
+        question = expand_fragment(
+            expand_identifier_question(formalize_question(question))
+        )
 
-        # Retrieve relevant chunks
+        # Retrieve relevant chunks. With reranking, cast a wide net first —
+        # the cross-encoder decides which candidates actually answer the
+        # question far better than embedding similarity can.
         search_started = time.time()
-        retrieved = self.retriever.retrieve(question, top_k=self.top_k)
+        reranker = self.reranker
+        if reranker is not None:
+            candidates = self.retriever.retrieve(question, top_k=self.rerank_candidates)
+            retrieved = reranker.rerank(question, candidates, top_k=self.rerank_top_k)
 
+            # Exact-identifier safety net: the retriever guarantees that
+            # chunks literally containing a rare query token (field codes
+            # like "ins") lead its results, but the cross-encoder is free to
+            # rank them out of the top-k again. If that happened, re-insert
+            # the retriever's best rare chunk right after the reranker's top
+            # pick.
+            rare_ids = getattr(self.retriever, "last_rare_chunk_ids", set())
+            if rare_ids and not any(id(c) in rare_ids for c, _ in retrieved):
+                rare_best = next(
+                    ((c, s) for c, s in candidates if id(c) in rare_ids), None
+                )
+                if rare_best is not None:
+                    logger.info("Reranker dropped all rare-token chunks — re-inserting one")
+                    retrieved = (
+                        retrieved[:1] + [rare_best] + retrieved[1:]
+                    )[: self.rerank_top_k]
+        else:
+            retrieved = self.retriever.retrieve(question, top_k=self.top_k)
+        retrieved = self._with_neighbors(retrieved)
+
+        overview_injected = False
         if self._is_overview_question(question):
             # "What is this document about?" — the answer lives in the
             # document's opening (title / هدف section), which similarity
@@ -329,6 +449,7 @@ class RAGPipeline:
                 (chunk, score) for chunk, score in retrieved if chunk["text"] not in intro_texts
             ]
             retrieved = retrieved[: self.top_k + 3]
+            overview_injected = True
 
         if not retrieved:
             return {
@@ -362,9 +483,16 @@ class RAGPipeline:
             # almost always means the model misread the question, not that the
             # answer is missing. One retry with an explicit nudge fixes most
             # of these (costs one extra generation only in this rare case).
+            # Rare-token questions ("ins چیست") retry regardless of score:
+            # cross-encoder scores run low on bare identifiers even when the
+            # right table row IS in context, and the verbatim retry is exactly
+            # what quoting a table/JSON answer needs.
             top_score = retrieved[0][1] if retrieved else 0.0
+            has_rare = bool(getattr(self.retriever, "last_rare_chunk_ids", set()))
             refusal_marker = "پیدا نشد"
-            if refusal_marker in qa_result.get("answer", "") and top_score >= 0.55:
+            if refusal_marker in qa_result.get("answer", "") and (
+                top_score >= 0.55 or has_rare
+            ):
                 logger.info("Refusal despite strong retrieval — retrying with a nudge")
                 nudged = (
                     f"{question}\n"
@@ -392,13 +520,24 @@ class RAGPipeline:
         logger.info(f"QA result - Score: {qa_result['score']:.3f}, Answer length: {len(qa_result.get('answer', ''))}")
 
         # Heuristic confidence from retrieval quality: the generative model
-        # has no calibrated self-confidence, but the similarity score of the
-        # best retrieved chunk tracks answer reliability well in practice
-        # (>=0.8 almost always right, <0.4 usually nothing relevant found).
+        # has no calibrated self-confidence, but the top retrieval score
+        # tracks answer reliability well in practice. With the reranker, the
+        # cross-encoder probability is used directly (it is far better
+        # calibrated than embedding similarity).
+        # Overview questions get intro chunks with a hand-assigned score of
+        # 1.0 — a confidence derived from that would always read ~99% while
+        # meaning nothing, so none is shown at all.
         confidence: int | None = None
-        if retrieved and "پیدا نشد" not in qa_result.get("answer", ""):
+        if (
+            retrieved
+            and not overview_injected
+            and "پیدا نشد" not in qa_result.get("answer", "")
+        ):
             top = retrieved[0][1]
-            confidence = round(min(max((top - 0.30) / (0.85 - 0.30), 0.0), 1.0) * 80 + 15)
+            if reranker is not None:
+                confidence = round(min(max(top, 0.0), 1.0) * 94 + 5)
+            else:
+                confidence = round(min(max((top - 0.30) / (0.85 - 0.30), 0.0), 1.0) * 80 + 15)
 
         # Prepare response
         response = {

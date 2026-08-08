@@ -41,6 +41,20 @@ TOP_K = 5  # Number of chunks to retrieve (more = better context but slower answ
 HYBRID_SEARCH_ENABLED = True  # Enable hybrid search (semantic + keyword)
 KEYWORD_WEIGHT = 0.2  # Weight for keyword search in hybrid (favor semantic)
 
+# Reranking settings
+# A cross-encoder reads (question, chunk) together and judges relevance far
+# more precisely than embedding similarity. Retrieval fetches RERANK_CANDIDATES
+# chunks, the reranker keeps the RERANK_TOP_K best. Costs ~1-2s per question on
+# CPU; the model (~2 GB RAM) downloads once on first use.
+RERANK_ENABLED = True
+RERANK_MODEL = "BAAI/bge-reranker-v2-m3"  # multilingual, strong Persian
+RERANK_CANDIDATES = 12  # wide net from retrieval; the reranker filters it
+RERANK_TOP_K = 4  # chunks passed to the answer model after reranking
+# Token cap per (question, chunk) pair. Rerank cost on CPU scales with
+# candidates × length² — 320 covers most of a 900-char Persian chunk and is
+# ~2x faster than the model's native 512.
+RERANK_MAX_LENGTH = 320
+
 # QA settings
 # Answer engine. Generative (an instruction-tuned LLM) produces fluent, natural
 # Persian answers instead of copied fragments. Set USE_GENERATIVE = False to fall
@@ -58,6 +72,10 @@ GENERATIVE_GGUF_FILE = "*q4_k_m.gguf"
 # variant is ~3x faster but noticeably less accurate.
 GENERATIVE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"  # fast option: "Qwen/Qwen2.5-0.5B-Instruct"
 GENERATIVE_MAX_NEW_TOKENS = 350  # cap on answer length (tokens); lower = faster
+# Sampling temperature. Benchmarked on scripts/eval_qa.py: 0.1 scores no worse
+# than 0.3 and rambles less (shorter, faster answers). Raise for chattier
+# style at some cost in factual precision.
+GENERATIVE_TEMPERATURE = 0.1
 # Reading the context (prefill) dominates answer latency on CPU: ~42 tok/s,
 # and Persian is token-dense (~0.45 tok/char). 2200 chars ≈ 1000 tokens ≈ 24s.
 GENERATIVE_MAX_CONTEXT_CHARS = 2200

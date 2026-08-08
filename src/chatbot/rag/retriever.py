@@ -51,6 +51,12 @@ class HybridRetriever:
         # Normalize the query the same way indexed text was normalized.
         query = normalize_persian(query)
 
+        # Chunks containing a rare query token from the LAST retrieve() call.
+        # Exposed so a downstream reranker can keep the exact-identifier
+        # guarantee (see pipeline.ask): rare-token chunks lead our results,
+        # but a cross-encoder is free to reorder them out again.
+        self.last_rare_chunk_ids: set = set()
+
         # Semantic search
         query_embedding = self.embedding_generator.generate_embedding(query)
         semantic_results = self.vectorstore.search(query_embedding, top_k=top_k * 2)  # Get more for hybrid
@@ -64,6 +70,7 @@ class HybridRetriever:
         # enter the candidate set on their own.
         corpus = getattr(self.vectorstore, "chunks", None) or [c for c, _ in semantic_results]
         keyword_scores, rare_chunk_ids = self._keyword_scores(query, corpus)
+        self.last_rare_chunk_ids = rare_chunk_ids
 
         candidates: list[tuple[dict, float]] = list(semantic_results)
         semantic_ids = {id(chunk) for chunk, _ in semantic_results}
