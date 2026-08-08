@@ -4,9 +4,9 @@ A fully local Retrieval-Augmented Generation (RAG) system in Python. It ingests
 documents, embeds them, stores them in a FAISS vector index, and answers
 questions using a **local generative LLM** — producing fluent, natural answers.
 
-**Supports both Persian/Farsi and English!** 🇮🇷 🇬🇧
+**Supports both Persian/Farsi and English!**
 
-> 🇮🇷 نسخه‌ی فارسی این راهنما: [FAREADME.md](FAREADME.md)
+> نسخه‌ی فارسی این راهنما: [FAREADME.md](FAREADME.md)
 
 ## Features
 
@@ -165,6 +165,7 @@ print(f"Sources: {len(response['source_chunks'])} chunks")
 Edit [src/chatbot/config.py](src/chatbot/config.py):
 
 - `USE_GENERATIVE` — `True` (default) for fluent generated answers; `False` for the extractive fallback
+- `RERANK_ENABLED` — `True` (default): a cross-encoder re-scores retrieved candidates for much more precise context selection; set `False` to save ~2 GB RAM and ~1-2 s per question
 - `GENERATIVE_MODEL` — default `Qwen/Qwen2.5-0.5B-Instruct` (fast CPU answers); switch to `Qwen/Qwen2.5-1.5B-Instruct` for higher quality (~3x slower on CPU)
 - `GENERATIVE_MAX_NEW_TOKENS`, `GENERATIVE_MAX_CONTEXT_CHARS` — answer length / context size caps (lower = faster)
 - `EMBEDDING_MODEL`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, `TOP_K`, hybrid-search weights
@@ -184,6 +185,7 @@ Data locations can be overridden with environment variables:
 ## Models
 
 - **Embeddings**: `intfloat/multilingual-e5-base` (768-d, multilingual with strong Persian)
+- **Reranker**: `BAAI/bge-reranker-v2-m3` (cross-encoder; re-scores 20 candidates, keeps the best 4)
 - **Generation**: `Qwen/Qwen2.5-0.5B-Instruct` (multilingual, fast on CPU; `1.5B` optional for quality)
 - **Extractive fallback**: `mrm8488/bert-multi-cased-finetuned-xquadv1`
 

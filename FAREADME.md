@@ -7,9 +7,9 @@
 با استفاده از یک **مدل زبانی مولّد محلی** به سؤالات پاسخ می‌دهد — پاسخ‌هایی روان و
 طبیعی.
 
-**از فارسی و انگلیسی پشتیبانی می‌کند!** 🇮🇷 🇬🇧
+**از فارسی و انگلیسی پشتیبانی می‌کند!**
 
-> 🇬🇧 The English version is available in [README.md](README.md).
+> The English version is available in [README.md](README.md).
 
 ## ویژگی‌ها
 
@@ -177,6 +177,7 @@ print(f"Sources: {len(response['source_chunks'])} chunks")
 فایل [src/chatbot/config.py](src/chatbot/config.py) را ویرایش کنید:
 
 - `USE_GENERATIVE` — مقدار `True` (پیش‌فرض) برای پاسخ‌های مولّد روان؛ `False` برای موتور استخراجی
+- `RERANK_ENABLED` — مقدار `True` (پیش‌فرض): یک cross-encoder کاندیدهای بازیابی‌شده را دوباره امتیازدهی می‌کند و انتخاب context را بسیار دقیق‌تر می‌کند؛ با `False` حدود ۲ گیگابایت رم و ۱–۲ ثانیه در هر سؤال صرفه‌جویی می‌شود
 - `GENERATIVE_MODEL` — پیش‌فرض `Qwen/Qwen2.5-1.5B-Instruct`؛ روی سیستم‌های کم‌رم از `Qwen/Qwen2.5-0.5B-Instruct` استفاده کنید
 - `EMBEDDING_MODEL`، `CHUNK_SIZE`، `CHUNK_OVERLAP`، `TOP_K` و وزن‌های جست‌وجوی ترکیبی
 
@@ -195,6 +196,7 @@ print(f"Sources: {len(response['source_chunks'])} chunks")
 ## مدل‌ها
 
 - **بردارسازی:** `intfloat/multilingual-e5-base` (۷۶۸ بُعدی، چندزبانه با فارسیِ قوی)
+- **بازچینش (Reranker):** `BAAI/bge-reranker-v2-m3` (cross-encoder؛ ۲۰ کاندید را دوباره امتیاز می‌دهد و ۴ تای برتر را نگه می‌دارد)
 - **تولید پاسخ:** `Qwen/Qwen2.5-1.5B-Instruct` (چندزبانه، فارسیِ خوب)
 - **جایگزین استخراجی:** `mrm8488/bert-multi-cased-finetuned-xquadv1`
 
