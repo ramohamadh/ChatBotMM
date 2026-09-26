@@ -101,13 +101,13 @@ class RAGPipeline:
         rerank_top_k: int = 4,
         rerank_max_length: int = 320,
         use_generative: bool = True,
-        generative_model: str = "Qwen/Qwen2.5-1.5B-Instruct",
+        generative_model: str = "Qwen/Qwen3-4B-Instruct-2507",
         generative_max_new_tokens: int = 300,
         generative_max_context_chars: int = 3500,
         generative_temperature: float | None = None,
         generative_backend: str = "llama.cpp",
-        generative_gguf_repo: str = "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
-        generative_gguf_file: str = "*q4_k_m.gguf",
+        generative_gguf_repo: str = "unsloth/Qwen3-4B-Instruct-2507-GGUF",
+        generative_gguf_file: str = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
     ):
         """
         Initialize the RAG pipeline.
@@ -203,6 +203,9 @@ class RAGPipeline:
                         max_new_tokens=self._generative_max_new_tokens,
                         max_context_chars=self._generative_max_context_chars,
                         temperature=self._generative_temperature,
+                        # Optional UI hook: set this attribute before the first
+                        # ask()/warm_up() to get load progress (0.0–1.0).
+                        load_progress=getattr(self, "on_model_load_progress", None),
                     )
                     return self._qa
                 except ImportError:

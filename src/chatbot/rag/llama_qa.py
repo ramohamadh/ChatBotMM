@@ -10,7 +10,9 @@ callback support.
 
 import logging
 from collections.abc import Callable
+from contextlib import contextmanager, nullcontext
 
+import llama_cpp
 from llama_cpp import Llama
 
 from .generative_qa import (
@@ -28,18 +30,47 @@ from .generative_qa import (
 logger = logging.getLogger(__name__)
 
 
+@contextmanager
+def _report_load_progress(callback: Callable[[float], None]):
+    """Route llama.cpp's native model-load progress (0.0–1.0) to `callback`.
+
+    The C API reports real load progress via llama_model_params
+    .progress_callback, but the Python wrapper's Llama.__init__ doesn't expose
+    it — it builds its params from llama_model_default_params(). Temporarily
+    wrapping that factory injects the callback into the params every Llama
+    created inside this context will use.
+    """
+    c_callback = llama_cpp.llama_progress_callback(
+        # Return True to tell llama.cpp to keep loading.
+        lambda progress, _user_data: callback(float(progress)) or True
+    )
+    original = llama_cpp.llama_model_default_params
+
+    def with_progress():
+        params = original()
+        params.progress_callback = c_callback
+        return params
+
+    llama_cpp.llama_model_default_params = with_progress
+    try:
+        yield
+    finally:
+        llama_cpp.llama_model_default_params = original
+
+
 class LlamaGenerativeQA:
     """Generative QA using a quantized GGUF model through llama.cpp."""
 
     def __init__(
         self,
-        repo_id: str = "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
-        filename: str = "*q4_k_m.gguf",
+        repo_id: str = "unsloth/Qwen3-4B-Instruct-2507-GGUF",
+        filename: str = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
         max_new_tokens: int = 300,
         max_context_chars: int = 3500,
-        n_ctx: int = 4096,
+        n_ctx: int = 8192,
         n_batch: int = 2048,
         temperature: float | None = None,
+        load_progress: Callable[[float], None] | None = None,
     ):
         """
         Args:
@@ -48,18 +79,27 @@ class LlamaGenerativeQA:
             max_new_tokens: Cap on generated answer length.
             max_context_chars: Cap on retrieved context passed to the model.
             n_ctx: Model context window in tokens.
+            load_progress: Optional callback receiving model-load progress
+                as a fraction (0.0–1.0), e.g. to drive a progress bar.
         """
         logger.info(f"Loading GGUF model: {repo_id} ({filename})")
-        # Downloads on first use, then loads from the local HF cache.
-        self.llm = Llama.from_pretrained(
-            repo_id=repo_id,
-            filename=filename,
-            n_ctx=n_ctx,
-            # Larger prefill batches are ~1.6x faster on this class of CPU
-            # (measured: 26 tok/s at the default 512 vs 42 tok/s at 2048).
-            n_batch=n_batch,
-            verbose=False,
+        progress_scope = (
+            _report_load_progress(load_progress) if load_progress else nullcontext()
         )
+        # Downloads on first use, then loads from the local HF cache.
+        with progress_scope:
+            self.llm = Llama.from_pretrained(
+                repo_id=repo_id,
+                filename=filename,
+                n_ctx=n_ctx,
+                # Larger prefill batches are ~1.6x faster on this class of CPU
+                # (measured: 26 tok/s at the default 512 vs 42 tok/s at 2048).
+                n_batch=n_batch,
+                # Offload every layer to the GPU when the build supports it
+                # (Metal on Apple Silicon). Ignored by CPU-only builds.
+                n_gpu_layers=-1,
+                verbose=False,
+            )
         self.max_new_tokens = max_new_tokens
         self.max_context_chars = max_context_chars
         self.temperature = TEMPERATURE if temperature is None else temperature

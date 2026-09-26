@@ -11,6 +11,7 @@ fresh packages import cleanly.
 import importlib.util
 import logging
 import os
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -44,8 +45,13 @@ _REQUIRED = {**_CLI_DEPS, **_RUNTIME_DEPS}
 _OPTIONAL_DEPS = {
     "llama-cpp-python": "llama_cpp",
 }
-# Prebuilt CPU wheels (avoids compiling from source where a wheel exists).
-_LLAMA_CPP_WHEEL_INDEX = "https://abetlen.github.io/llama-cpp-python/whl/cpu"
+# Prebuilt wheels (avoids compiling from source where a wheel exists).
+# On Apple Silicon use the Metal build so generation runs on the GPU;
+# elsewhere fall back to the CPU wheels.
+if sys.platform == "darwin" and platform.machine() == "arm64":
+    _LLAMA_CPP_WHEEL_INDEX = "https://abetlen.github.io/llama-cpp-python/whl/metal"
+else:
+    _LLAMA_CPP_WHEEL_INDEX = "https://abetlen.github.io/llama-cpp-python/whl/cpu"
 
 # Guard env var so a re-exec'd child never tries to install again (prevents loops).
 _REEXEC_FLAG = "CHATBOT_BOOTSTRAPPED"

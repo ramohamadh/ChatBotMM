@@ -15,4 +15,5 @@ def test_data_paths_point_under_project_root():
 
 def test_generative_defaults():
     assert config.USE_GENERATIVE is True
-    assert "Qwen" in config.GENERATIVE_MODEL
+    assert "gemma" in config.GENERATIVE_MODEL.lower()
+    assert config.GENERATIVE_GGUF_FILE.endswith(".gguf")

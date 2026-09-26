@@ -191,8 +191,7 @@ def _print_answer(response: dict, show_context: bool = False, panel: bool = True
 def ask_single_question(question: str, return_context: bool = False) -> dict:
     """Ask one question and return the response dict (indexing first if needed)."""
     _quiet_logs()
-    console.print("📚 Loading models… (the first run downloads them — progress below)")
-    rag = get_default_rag_pipeline()
+    rag = _load_pipeline_with_status()
 
     if not rag.is_indexed:
         console.print("⚠️  No index found — indexing documents first…")
@@ -246,9 +245,10 @@ def _hf_model_cached(repo_id: str) -> bool:
 
 
 def _load_pipeline_with_status() -> RAGPipeline:
-    """Load the pipeline with staged status output.
+    """Load the pipeline with staged progress output.
 
-    All models cached  -> animated spinner per stage, then "✔ Ready".
+    All models cached  -> animated per-stage progress with elapsed time,
+                          then "✔ Ready".
     Downloads expected -> static lines; the download bars show the progress.
     """
     answer_model_cached = (
@@ -268,11 +268,43 @@ def _load_pipeline_with_status() -> RAGPipeline:
         rag.warm_up()
         return rag
 
-    with console.status("[yellow]Loading embedding model…[/yellow]", spinner="dots") as status:
+    from rich.progress import (
+        BarColumn,
+        Progress,
+        SpinnerColumn,
+        TaskProgressColumn,
+        TextColumn,
+        TimeElapsedColumn,
+    )
+
+    started = time.time()
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[yellow]{task.description}[/yellow]"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        # The embedding model and reranker expose no load progress, so their
+        # stages show a pulsing bar. The answer model (llama.cpp) reports real
+        # progress — its stage fills 0→100%.
+        task = progress.add_task("Loading the embedding model…", total=None)
         rag = get_default_rag_pipeline()
-        status.update("[yellow]Loading the answer model…[/yellow]")
-        rag.warm_up()
-    console.print("[green]✔ Ready[/green]")
+        if config.GENERATIVE_BACKEND == "llama.cpp":
+            progress.update(
+                task, description="Loading the answer model…", total=100, completed=0
+            )
+            rag.on_model_load_progress = lambda fraction: progress.update(
+                task, completed=int(fraction * 100)
+            )
+        else:
+            progress.update(task, description="Loading the answer model…")
+        _ = rag.qa
+        progress.update(task, description="Loading the reranker…", total=None)
+        _ = rag.reranker
+    console.print(f"[green]✔ Ready[/green] [dim](models loaded in {time.time() - started:.1f} s)[/dim]")
     return rag
 
 

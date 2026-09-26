@@ -15,7 +15,7 @@ questions using a **local generative LLM** — producing fluent, natural answers
 - **Multilingual Embeddings**: `intfloat/multilingual-e5-base` (much stronger Persian retrieval)
 - **Vector Storage**: FAISS with save/load and incremental updates
 - **Hybrid Retrieval**: Semantic + keyword search
-- **Generative Answers**: Local instruction-tuned LLM (`Qwen2.5-0.5B-Instruct` by default, fast on CPU) writes fluent Persian — not just copied fragments, streamed live into the terminal. An extractive fallback is also available.
+- **Generative Answers**: Local instruction-tuned LLM (`Gemma 3 4B` 4-bit GGUF by default, GPU-accelerated on Apple Silicon) writes fluent Persian — not just copied fragments, streamed live into the terminal. An extractive fallback is also available.
 - **Packaged**: `src/` layout, `pyproject.toml`, console entrypoint, and tests
 
 ## Installation
@@ -166,7 +166,7 @@ Edit [src/chatbot/config.py](src/chatbot/config.py):
 
 - `USE_GENERATIVE` — `True` (default) for fluent generated answers; `False` for the extractive fallback
 - `RERANK_ENABLED` — `True` (default): a cross-encoder re-scores retrieved candidates for much more precise context selection; set `False` to save ~2 GB RAM and ~1-2 s per question
-- `GENERATIVE_MODEL` — default `Qwen/Qwen2.5-0.5B-Instruct` (fast CPU answers); switch to `Qwen/Qwen2.5-1.5B-Instruct` for higher quality (~3x slower on CPU)
+- `GENERATIVE_GGUF_REPO` / `GENERATIVE_MODEL` — default `gemma-3-4b-it` (4-bit GGUF, GPU-accelerated via Metal on Apple Silicon); `gemma-3-12b-it` for higher quality, or `Qwen2.5-1.5B-Instruct` on low-RAM machines
 - `GENERATIVE_MAX_NEW_TOKENS`, `GENERATIVE_MAX_CONTEXT_CHARS` — answer length / context size caps (lower = faster)
 - `EMBEDDING_MODEL`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, `TOP_K`, hybrid-search weights
 
@@ -186,7 +186,7 @@ Data locations can be overridden with environment variables:
 
 - **Embeddings**: `intfloat/multilingual-e5-base` (768-d, multilingual with strong Persian)
 - **Reranker**: `BAAI/bge-reranker-v2-m3` (cross-encoder; re-scores 20 candidates, keeps the best 4)
-- **Generation**: `Qwen/Qwen2.5-0.5B-Instruct` (multilingual, fast on CPU; `1.5B` optional for quality)
+- **Generation**: `google/gemma-3-4b-it` (4-bit GGUF via llama.cpp, 140-language multilingual with strong Persian; `gemma-3-12b-it` optional for quality, `Qwen2.5-1.5B` fallback for low-RAM machines)
 - **Extractive fallback**: `mrm8488/bert-multi-cased-finetuned-xquadv1`
 
 Models download automatically on first use and are cached in `~/.cache/huggingface/`.
@@ -204,7 +204,7 @@ black .         # format
 
 - **Poor/garbled Persian answers** — make sure `USE_GENERATIVE = True`. If you have an old index from a previous version, run `chatbot rebuild`.
 - **Index not found** — run `chatbot index` first.
-- **Out of memory loading the model** — switch `GENERATIVE_MODEL` to `Qwen/Qwen2.5-0.5B-Instruct`.
+- **Out of memory loading the model** — switch `GENERATIVE_GGUF_REPO`/`GENERATIVE_GGUF_FILE` to `Qwen/Qwen2.5-1.5B-Instruct-GGUF` / `*q4_k_m.gguf`.
 - **First run is slow** — the generative model (~3 GB) is downloading; subsequent runs are fast and offline.
 
 ## License

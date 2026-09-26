@@ -54,3 +54,4 @@ Thumbs.db
 *.temp
 
 data/docs
+data/eval_runs/

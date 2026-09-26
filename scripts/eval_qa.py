@@ -43,12 +43,23 @@ from chatbot.rag.chunker import (  # noqa: E402
 from chatbot.rag.generative_qa import build_context  # noqa: E402
 
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
+_LIGATURE_FIXES = [
+    ("طال", "طلا"), ("اطالع", "اطلاع"), ("اصالح", "اصلاح"), ("میالد", "میلاد"),
+    ("ابطال", "ابطال"), ("اعالم", "اعلام"), ("الزام", "الزام"), ("پالتین", "پلاتین"),
+    ("کاال", "کالا"), ("االن", "الان"),
+]
 
 
 def canon(text: str) -> str:
     """Normalize text so keyword matching survives spelling variation."""
     text = normalize_persian(text or "").translate(_DIGITS)
     text = text.replace("‌", " ")  # ZWNJ -> space
+    # PDF extraction sometimes renders the lam-alef ligature reversed
+    # ("کاال" for "کالا"); fold both spellings together so keyword
+    # matching does not depend on which one the model copied.
+    text = text.replace("اال", "الا")
+    for bad, good in _LIGATURE_FIXES:
+        text = text.replace(bad, good)
     return re.sub(r"\s+", " ", text).lower()
 
 
@@ -68,6 +79,10 @@ def build_pipeline(args):
     from chatbot.commands import get_default_rag_pipeline
 
     rag = get_default_rag_pipeline()
+    if args.gguf_repo:
+        rag._generative_gguf_repo = args.gguf_repo
+    if args.gguf_file:
+        rag._generative_gguf_file = args.gguf_file
     if args.candidates:
         rag.rerank_candidates = args.candidates
     if args.max_length:
@@ -113,6 +128,11 @@ def main() -> int:
     parser.add_argument(
         "--temperature", type=float, help="override generation temperature (full mode)"
     )
+    parser.add_argument("--gguf-repo", help="override GENERATIVE_GGUF_REPO (full mode)")
+    parser.add_argument("--gguf-file", help="override GENERATIVE_GGUF_FILE (full mode)")
+    parser.add_argument(
+        "--report", help="write per-question results (JSON) to this path"
+    )
     args = parser.parse_args()
 
     items = json.loads(Path(args.questions).read_text(encoding="utf-8"))
@@ -136,7 +156,7 @@ def main() -> int:
     )
     print(f"Mode: {mode} | rerank: {rr} | questions: {len(items)}\n")
 
-    hits, times = 0, []
+    hits, times, rows = 0, [], []
     for i, item in enumerate(items, 1):
         q = item["question"]
         if args.retrieval_only:
@@ -150,11 +170,45 @@ def main() -> int:
         hits += ok
         times.append(elapsed)
         mark = "PASS" if ok else "FAIL"
-        print(f"[{i:2}/{len(items)}] {mark}  {elapsed:6.1f}s  {q}")
+        print(f"[{i:2}/{len(items)}] {mark}  {elapsed:6.1f}s  {q}", flush=True)
         if not ok and not args.retrieval_only:
-            print(f"        answer: {text[:120]!r}")
+            print(f"        answer: {text[:160]!r}", flush=True)
+        rows.append(
+            {
+                "id": item.get("id", i),
+                "topic": item.get("topic"),
+                "page": item.get("page"),
+                "question": q,
+                "expected": item.get("answer"),
+                "got": text if not args.retrieval_only else None,
+                "pass": ok,
+                "seconds": round(elapsed, 1),
+            }
+        )
 
     total = len(items)
+    if args.report:
+        model = (
+            f"{rag._generative_gguf_repo}/{rag._generative_gguf_file}"
+            if not args.retrieval_only
+            else "retrieval-only"
+        )
+        Path(args.report).write_text(
+            json.dumps(
+                {
+                    "model": model,
+                    "mode": mode,
+                    "hits": hits,
+                    "total": total,
+                    "avg_seconds": round(sum(times) / total, 1),
+                    "results": rows,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"report written to {args.report}")
     print(
         f"\n=== {mode} | rerank {rr} ==="
         f"\nhit rate : {hits}/{total} ({100 * hits / total:.0f}%)"
