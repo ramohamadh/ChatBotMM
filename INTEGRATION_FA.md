@@ -73,69 +73,36 @@ gitignore است تا پسورد وارد گیت نشود) خوانده می‌�
 
 `GET /health` (برای readiness probe)، `GET /stats`، `POST /index` (بازسازی ایندکس پس از تغییر پایگاه دانش).
 
-## سمت gorest
+## سمت gorest — پیاده‌سازی شده ✅
 
-### ۱. کانفیگ (`config/config.go` و فایل‌های `config-*.yml`)
+ماژول چت‌بات در خود gorest پیاده‌سازی و تست شده است (`api/modules/chatbot/`):
 
-```go
-type ChatbotConfig struct {
-    Endpoint string
-    UseSSL   bool
-}
-// در struct Config:  Chatbot ChatbotConfig
+| مسیر gorest | کار |
+|---|---|
+| `POST /v1/chatbot/ask` | سوال را با `userInfo["uuid"]` از میدل‌ور Casdoor به چت‌بات می‌فرستد (بدنه: `question` اجباری، `taxpayer_id` و `session_id` اختیاری) |
+| `GET /v1/chatbot/history` | تاریخچه‌ی خود کاربر لاگین‌شده؛ با `?user_id=` تاریخچه‌ی کاربر دیگر (گزارش ادمین) |
+| `GET /v1/chatbot/users` | کدام کاربر چند سوال پرسیده |
+
+فایل‌ها:
+
+- `config/config.go` → struct جدید `ChatbotConfig {Endpoint, UseSSL}` + فیلد `Chatbot` در `Config`؛ بخش `chatbot:` به هر سه فایل `config-*.yml` اضافه شده (پیش‌فرض `127.0.0.1:8000`).
+- `api/modules/chatbot/{dto,service,controllers,routes}` — سرویس با کلاینت اختصاصی **۱۸۰ ثانیه‌ای** برای `/ask` (بدون retry) و کلاینت ۱۰ ثانیه‌ای برای history/users. متغیر محیطی `CHATBOT_ENDPOINT` روی کانفیگ اولویت دارد.
+- روت‌ها در `api/routes/routes.go` زیر `protectedRoutes` (پشت `IntrospectionMiddleware`) ثبت شده‌اند — شناسه کاربر جعل‌شدنی نیست چون از body خوانده نمی‌شود.
+
+### تست یکپارچه بدون بالا آوردن کل gorest
+
+`cmd/chatbotdemo/main.go` همان روت‌ها و هندلرهای واقعی را با یک میدل‌ور شبیه‌ساز لاگین بالا می‌آورد — بدون Postgres/Redis/RabbitMQ/Casdoor؛ فقط با سرویس چت‌بات و دیتابیس `ai` کار دارد:
+
+```bash
+# سرویس ۱ — چت‌بات
+chatbot serve --port 8000
+# سرویس ۲ — دموی gorest (فقط ماژول چت‌بات)
+cd gorest && CHATBOT_ENDPOINT=http://127.0.0.1:8000 go run ./cmd/chatbotdemo
+
+curl -X POST http://127.0.0.1:8070/v1/chatbot/ask \
+     -H 'Content-Type: application/json' \
+     -d '{"question": "چجوری فاکتور بزنم؟"}'
 ```
-
-```yaml
-chatbot:
-  endpoint: <chatbot-host>:8000
-  useSSL: false
-```
-
-### ۲. هندلر — شناسه کاربر مستقیم از میدل‌ور
-
-```go
-func AskChatbot(c *gin.Context) {
-    userInfo := c.MustGet("userInfo").(map[string]interface{})
-    userUUID := fmt.Sprintf("%v", userInfo["uuid"]) // از میدل‌ور Casdoor؛ بدون کوئری DB
-
-    var req struct {
-        Question   string `json:"question" binding:"required"`
-        TaxpayerID string `json:"taxpayer_id"`
-        SessionID  string `json:"session_id"`
-    }
-    if err := c.ShouldBindJSON(&req); err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-        return
-    }
-
-    cfg := config.GetConfig()
-    scheme := "http"
-    if cfg.Chatbot.UseSSL {
-        scheme = "https"
-    }
-
-    response, err := Invogate.GenericHTTPClientInvogate(c.Request.Context(), &Invogate.RequestConfig{
-        Method:   http.MethodPost,
-        BaseURL:  fmt.Sprintf("%s://%s", scheme, cfg.Chatbot.Endpoint),
-        Endpoint: "/ask",
-        Headers:  map[string]string{"Content-Type": "application/json"},
-        Body: map[string]string{
-            "question":    req.Question,
-            "uuid":        userUUID,
-            "taxpayer_id": req.TaxpayerID,
-            "session_id":  req.SessionID,
-        },
-        Client: &http.Client{Timeout: 120 * time.Second}, // تولید جواب کند است
-    })
-    if err != nil {
-        c.JSON(http.StatusBadGateway, gin.H{"error": "chatbot unavailable"})
-        return
-    }
-    c.JSON(http.StatusOK, models.Response[any]{Data: response})
-}
-```
-
-گزارش ادمین («کدوم کاربر چیا پرسیده») هم با همان الگو `GET /users` و `GET /history?user_id=…` را proxy کنید.
 
 ## جدول دیتابیس
 
