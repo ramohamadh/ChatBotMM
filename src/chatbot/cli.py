@@ -111,6 +111,28 @@ def ask(
 
 @app.command()
 @_friendly_errors
+def history(
+    limit: int = typer.Option(20, "--limit", "-n", help="Number of entries to show."),
+    full: bool = typer.Option(False, "--full", help="Show full answers, not a preview."),
+) -> None:
+    """Show past questions and answers (persisted across sessions)."""
+    from . import commands
+
+    store = commands.get_chat_history()
+    entries = store.recent(limit) if store else []
+    if not entries:
+        commands.console.print("[yellow]No chat history yet — ask a question first.[/yellow]")
+        return
+    for entry in entries:
+        date = entry["asked_at"].replace("T", " ")
+        commands.console.print(f"[cyan]{date}[/cyan]  [bold]{entry['question']}[/bold]")
+        answer = entry["answer"] if full else entry["answer"][:200]
+        suffix = "" if full or len(entry["answer"]) <= 200 else "…"
+        commands.console.print(f"  {answer}{suffix}\n")
+
+
+@app.command()
+@_friendly_errors
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind to."),
     port: int = typer.Option(8000, "--port", "-p", help="Port to listen on."),

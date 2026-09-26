@@ -90,6 +90,12 @@ QA_MODEL = "mrm8488/bert-multi-cased-finetuned-xquadv1"  # extractive fallback (
 MAX_CONTEXT_LENGTH = 1024  # Maximum context length for QA model (increased)
 MAX_ANSWER_LENGTH = 200  # Maximum answer length (increased)
 
+# Chat history settings
+# Every answered question is stored in a local SQLite database so past chats
+# survive across sessions (`/history` in chat, `chatbot history` in the CLI).
+HISTORY_ENABLED = True
+HISTORY_DB = Path(os.environ.get("CHATBOT_HISTORY_DB", DATA_DIR / "history.db"))
+
 # Logging settings
 LOG_LEVEL = "INFO"
 LOG_RETRIEVED_CHUNKS = True  # Log retrieved chunks for debugging

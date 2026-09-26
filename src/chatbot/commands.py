@@ -20,9 +20,17 @@ from rich.text import Text
 
 from . import config
 from .errors import console, print_friendly_error
+from .history import ChatHistory
 from .rag import RAGPipeline
 
 logger = logging.getLogger(__name__)
+
+
+def get_chat_history() -> ChatHistory | None:
+    """The persistent chat-history store, or None when disabled."""
+    if not config.HISTORY_ENABLED:
+        return None
+    return ChatHistory(config.HISTORY_DB)
 
 
 def _quiet_logs() -> None:
@@ -198,7 +206,11 @@ def ask_single_question(question: str, return_context: bool = False) -> dict:
         index_documents(rag=rag)
 
     console.print(Text("🔍 Searching & thinking…", style="dim yellow"))
-    return rag.ask(question, return_context=return_context)
+    response = rag.ask(question, return_context=return_context)
+    history = get_chat_history()
+    if history:
+        history.add(question, response.get("answer", ""), response.get("confidence"))
+    return response
 
 
 def _flush_typeahead() -> None:
@@ -384,7 +396,7 @@ _HELP_TEXT = """\
 [cyan]/stats[/cyan]     session info (models, documents, chunks)
 [cyan]/context[/cyan]   show the chunks retrieved for the last answer
 [cyan]/sources[/cyan]   show the sources of the last answer
-[cyan]/history[/cyan]   list the questions asked this session
+[cyan]/history[/cyan]   list recent questions (persisted across sessions)
 [cyan]/reindex[/cyan]   rebuild the index from data/docs
 [cyan]/clear[/cyan]     clear the screen
 [cyan]/exit[/cyan]      quit (also: quit, exit, q, Ctrl+C)"""
@@ -421,10 +433,18 @@ def _handle_command(
         else:
             console.print("[yellow]No answer yet — ask a question first.[/yellow]")
     elif name == "history":
-        if not history:
+        store = get_chat_history()
+        entries = store.recent(20) if store else []
+        if entries:
+            console.print(f"[cyan]Last {len(entries)} questions (all sessions):[/cyan]")
+            for i, entry in enumerate(entries, 1):
+                date = entry["asked_at"].replace("T", " ")
+                console.print(f"[cyan]{i}.[/cyan] [dim]{date}[/dim]  {entry['question']}")
+        elif history:
+            for i, question in enumerate(history, 1):
+                console.print(f"[cyan]{i}.[/cyan] {question}")
+        else:
             console.print("[yellow]No questions asked yet.[/yellow]")
-        for i, question in enumerate(history, 1):
-            console.print(f"[cyan]{i}.[/cyan] {question}")
     elif name == "clear":
         console.clear()
     elif name == "reindex":
@@ -511,6 +531,9 @@ def interactive_qa(rag: RAGPipeline | None = None) -> None:
                 _print_timings(response, time.time() - started)
                 history.append(question)
                 last_response = response
+                store = get_chat_history()
+                if store:
+                    store.add(question, response.get("answer", ""), response.get("confidence"))
                 _flush_typeahead()
                 console.print()
             except (KeyboardInterrupt, EOFError):

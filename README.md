@@ -30,6 +30,14 @@ pip install -e ".[dev]"
 
 Place your documents in `data/docs/` (PDF, DOCX, TXT, or MD).
 
+The shipped corpus is a curated Persian **markdown knowledge base** about the
+Moadian electronic-invoicing system (concepts, invoice types/patterns, issuance
+guide, field validation rules, error codes, FAQ) written for customer-facing
+support — no internal infrastructure details are included. Markdown chunks
+split cleanly at headings, which retrieves far better than parsed PDF text;
+the original source PDF is kept in `data/source/` for reference and is not
+indexed.
+
 ## Quick Start
 
 The fastest way — one command that installs deps, indexes, and starts chatting:
@@ -72,6 +80,7 @@ chatbot rebuild        # or: chatbot index --force
 | `chatbot index` | Index `data/docs/` into the vector store. `--force` / `-f` rebuilds. |
 | `chatbot rebuild` | Rebuild the index from scratch (alias for `index --force`). |
 | `chatbot ask [QUESTION]` | Ask a question; omit `QUESTION` for interactive mode. `--context` / `-c` shows the retrieved chunks. |
+| `chatbot history` | Show past questions and answers (persisted in `data/history.db`, SQLite). `-n` limits, `--full` shows complete answers. |
 | `chatbot serve` | Start the REST API server (FastAPI). `--host` / `--port` to bind (default `127.0.0.1:8000`). |
 
 Run `chatbot --help` or `chatbot <command> --help` for full details.
@@ -139,7 +148,9 @@ print(f"Sources: {len(response['source_chunks'])} chunks")
 ├── requirements.txt        # pinned deps (also declared in pyproject)
 ├── README.md  FAREADME.md  USAGE_FA.md
 ├── data/
-│   ├── docs/               # put your documents here
+│   ├── docs/               # the indexed corpus — curated Persian markdown knowledge base
+│   ├── source/             # original source PDFs (reference only, NOT indexed)
+│   ├── history.db          # persistent chat history (SQLite, gitignored)
 │   └── vectorstore/        # generated FAISS index (gitignored)
 ├── src/chatbot/
 │   ├── __init__.py         # exports RAGPipeline, __version__

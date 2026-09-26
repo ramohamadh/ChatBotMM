@@ -37,6 +37,9 @@ ENV/
 data/vectorstore/
 *.index
 
+# Persistent chat history (local user data)
+data/history.db
+
 # Models cache (HuggingFace downloads are stored in ~/.cache by default)
 # .cache/
 # models/
@@ -53,5 +56,4 @@ Thumbs.db
 *.tmp
 *.temp
 
-data/docs
 data/eval_runs/

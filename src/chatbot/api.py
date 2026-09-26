@@ -144,6 +144,12 @@ def ask(request: AskRequest) -> AskResponse:
     with _ask_lock:
         response = pipeline.ask(request.question, return_context=request.return_context)
 
+    from .commands import get_chat_history
+
+    history = get_chat_history()
+    if history:
+        history.add(request.question, response.get("answer", ""), response.get("confidence"))
+
     sources = sorted(
         {
             chunk.get("metadata", {}).get("filename", "")

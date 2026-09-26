@@ -176,6 +176,9 @@ class TextChunker:
     # Numbered section headings like "1- هدف", "5-1 صورتحساب اصلی" or
     # "3-8-2 نمونه Json" at the start of a line.
     _SECTION_HEADING = re.compile(r"^\s*\d+(?:[-–]\d+){0,3}[-–]?\s+\S.{0,120}$")
+    # Markdown headings ("## چطور فاکتور بزنم؟") — the knowledge-base docs in
+    # data/docs are markdown, so each heading starts a new topical chunk.
+    _MD_HEADING = re.compile(r"^\s*#{1,6}\s+\S")
     # Sections shorter than this get merged with their neighbor (avoids
     # confetti chunks from tables of contents).
     _MIN_SECTION_CHARS = 250
@@ -185,7 +188,7 @@ class TextChunker:
         sections: list[str] = []
         current: list[str] = []
         for line in text.splitlines():
-            if self._SECTION_HEADING.match(line) and current:
+            if (self._SECTION_HEADING.match(line) or self._MD_HEADING.match(line)) and current:
                 sections.append("\n".join(current))
                 current = [line]
             else:
