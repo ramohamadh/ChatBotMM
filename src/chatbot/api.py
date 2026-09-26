@@ -3,10 +3,18 @@ REST API for ChatBotMM, built with FastAPI.
 
 A thin HTTP shell over the same RAGPipeline the CLI uses:
 
-    POST /ask     {"question": "..."}  -> answer + score + sources
+    POST /ask     {"question": "...", "user_id": "...", ...} -> answer + sources
     POST /index   {"force": false}     -> (re)index the documents in data/docs
+    GET  /history ?user_id=&limit=     -> stored Q&A, filterable per user
+    GET  /users                        -> per-user question counts
     GET  /stats                        -> index statistics
     GET  /health                       -> liveness / readiness info
+
+Designed to run as a standalone internal service that the company backend
+(gorest) calls: gorest forwards the authenticated user's identity
+(user_id/taxpayer_id) with each question and history is stored per user in
+PostgreSQL. NOTE for callers: answer generation on CPU can take tens of
+seconds — use an HTTP client timeout of at least 120 s for POST /ask.
 
 Run it with:
 
@@ -24,7 +32,7 @@ import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +47,21 @@ class AskRequest(BaseModel):
     question: str = Field(..., min_length=1, description="The question to ask.")
     return_context: bool = Field(
         False, description="Include the retrieved chunks in the response."
+    )
+    # Caller identity, passed through by the company backend (gorest) from its
+    # auth context so chat history is stored per user. gorest sends the user's
+    # UUID as "uuid" (user.UUID); "user_id" is accepted as an alias. All
+    # identity fields are optional.
+    user_id: str | None = Field(
+        None,
+        validation_alias=AliasChoices("uuid", "user_id"),
+        description="User's UUID from gorest (user.UUID). Also accepted as 'user_id'.",
+    )
+    taxpayer_id: str | None = Field(
+        None, description="Active taxpayer's UUID (Moadi id), if any."
+    )
+    session_id: str | None = Field(
+        None, description="Client-side conversation/session identifier."
     )
 
 
@@ -69,6 +92,33 @@ class HealthResponse(BaseModel):
     status: str
     indexed: bool
     total_chunks: int = 0
+
+
+class HistoryEntry(BaseModel):
+    asked_at: str
+    question: str
+    answer: str
+    confidence: int | None = None
+    user_id: str | None = None
+    taxpayer_id: str | None = None
+    session_id: str | None = None
+
+
+class HistoryResponse(BaseModel):
+    data: list[HistoryEntry]
+    meta: dict = {}
+
+
+class UserSummary(BaseModel):
+    user_id: str | None = None
+    questions: int
+    first_asked_at: str | None = None
+    last_asked_at: str | None = None
+
+
+class UsersResponse(BaseModel):
+    data: list[UserSummary]
+    meta: dict = {}
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +164,36 @@ def stats() -> dict:
     return app.state.pipeline.get_stats()
 
 
+@app.get("/history", response_model=HistoryResponse)
+def chat_history(user_id: str | None = None, limit: int = 50) -> HistoryResponse:
+    """Past questions and answers, optionally filtered to one user."""
+    from .commands import get_chat_history
+
+    store = get_chat_history()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Chat history is disabled.")
+    entries = store.recent(limit=limit, user_id=user_id)
+    return HistoryResponse(
+        data=[HistoryEntry(**entry) for entry in entries],
+        meta={"size": len(entries), "total_count": store.count()},
+    )
+
+
+@app.get("/users", response_model=UsersResponse)
+def chat_users() -> UsersResponse:
+    """Per-user summary: which user asked how many questions, and when."""
+    from .commands import get_chat_history
+
+    store = get_chat_history()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Chat history is disabled.")
+    summaries = store.users()
+    return UsersResponse(
+        data=[UserSummary(**summary) for summary in summaries],
+        meta={"total_count": len(summaries)},
+    )
+
+
 @app.post("/index", response_model=IndexResponse)
 def index_documents(request: IndexRequest) -> IndexResponse:
     """(Re)index the documents in the docs directory."""
@@ -148,7 +228,14 @@ def ask(request: AskRequest) -> AskResponse:
 
     history = get_chat_history()
     if history:
-        history.add(request.question, response.get("answer", ""), response.get("confidence"))
+        history.add(
+            request.question,
+            response.get("answer", ""),
+            response.get("confidence"),
+            user_id=request.user_id,
+            taxpayer_id=request.taxpayer_id,
+            session_id=request.session_id,
+        )
 
     sources = sorted(
         {

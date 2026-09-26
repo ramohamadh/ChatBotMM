@@ -20,17 +20,26 @@ from rich.text import Text
 
 from . import config
 from .errors import console, print_friendly_error
-from .history import ChatHistory
+from .history import create_history
 from .rag import RAGPipeline
 
 logger = logging.getLogger(__name__)
 
+_history_store = None
+_history_loaded = False
 
-def get_chat_history() -> ChatHistory | None:
-    """The persistent chat-history store, or None when disabled."""
-    if not config.HISTORY_ENABLED:
-        return None
-    return ChatHistory(config.HISTORY_DB)
+
+def get_chat_history():
+    """The persistent chat-history store (cached), or None when disabled.
+
+    Cached so the PostgreSQL backend keeps one connection instead of
+    reconnecting on every question.
+    """
+    global _history_store, _history_loaded
+    if not _history_loaded:
+        _history_store = create_history(config)
+        _history_loaded = True
+    return _history_store
 
 
 def _quiet_logs() -> None:
@@ -209,7 +218,12 @@ def ask_single_question(question: str, return_context: bool = False) -> dict:
     response = rag.ask(question, return_context=return_context)
     history = get_chat_history()
     if history:
-        history.add(question, response.get("answer", ""), response.get("confidence"))
+        history.add(
+            question,
+            response.get("answer", ""),
+            response.get("confidence"),
+            user_id="cli",
+        )
     return response
 
 
@@ -488,6 +502,9 @@ def interactive_qa(rag: RAGPipeline | None = None) -> None:
         # their echo anyway. The first prompt starts from a clean buffer.
         _flush_typeahead()
 
+        import uuid
+
+        session_id = str(uuid.uuid4())
         history: list[str] = []
         last_response: dict | None = None
 
@@ -533,7 +550,13 @@ def interactive_qa(rag: RAGPipeline | None = None) -> None:
                 last_response = response
                 store = get_chat_history()
                 if store:
-                    store.add(question, response.get("answer", ""), response.get("confidence"))
+                    store.add(
+                        question,
+                        response.get("answer", ""),
+                        response.get("confidence"),
+                        user_id="cli",
+                        session_id=session_id,
+                    )
                 _flush_typeahead()
                 console.print()
             except (KeyboardInterrupt, EOFError):

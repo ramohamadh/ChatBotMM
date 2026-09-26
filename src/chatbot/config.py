@@ -6,12 +6,30 @@ All parameters can be adjusted here for different use cases.
 import os
 from pathlib import Path
 
+
+def _load_dotenv(path: Path) -> None:
+    """Load KEY=VALUE lines from a local .env file into os.environ.
+
+    Real environment variables win over the file. Secrets (like the history
+    database password) live here so they never enter version control — copy
+    .env.example to .env and fill it in.
+    """
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
 # Base paths
 # config.py lives at <root>/src/chatbot/config.py, so the project root is three
 # levels up. Data lives at <root>/data/ (outside the package). Both can be
 # overridden via environment variables for deployment flexibility.
 PACKAGE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_DIR.parent.parent
+_load_dotenv(PROJECT_ROOT / ".env")
 DATA_DIR = Path(os.environ.get("CHATBOT_DATA_DIR", PROJECT_ROOT / "data"))
 
 DOCS_DIR = Path(os.environ.get("CHATBOT_DOCS_DIR", DATA_DIR / "docs"))
@@ -91,10 +109,27 @@ MAX_CONTEXT_LENGTH = 1024  # Maximum context length for QA model (increased)
 MAX_ANSWER_LENGTH = 200  # Maximum answer length (increased)
 
 # Chat history settings
-# Every answered question is stored in a local SQLite database so past chats
-# survive across sessions (`/history` in chat, `chatbot history` in the CLI).
+# Every answered question is recorded (`/history` in chat, `chatbot history`
+# in the CLI, GET /history and GET /users on the API). Backend:
+#   "postgres" — shared company database; gorest passes user_id/taxpayer_id
+#                with each question, so history is per-user. Falls back to
+#                SQLite automatically when the server is unreachable.
+#   "sqlite"   — local file only (data/history.db).
 HISTORY_ENABLED = True
+HISTORY_BACKEND = os.environ.get("CHATBOT_HISTORY_BACKEND", "postgres")
 HISTORY_DB = Path(os.environ.get("CHATBOT_HISTORY_DB", DATA_DIR / "history.db"))
+# Connection settings come from the environment or the gitignored .env file
+# (copy .env.example). With no password configured the postgres backend is
+# skipped and history falls back to SQLite.
+HISTORY_PG = {
+    "host": os.environ.get("CHATBOT_PG_HOST", "172.31.0.153"),
+    "port": int(os.environ.get("CHATBOT_PG_PORT", "5432")),
+    "user": os.environ.get("CHATBOT_PG_USER", "tsp"),
+    "password": os.environ.get("CHATBOT_PG_PASSWORD", ""),
+    "dbname": os.environ.get("CHATBOT_PG_DBNAME", "ai"),
+    "sslmode": os.environ.get("CHATBOT_PG_SSLMODE", "disable"),
+    "connect_timeout": int(os.environ.get("CHATBOT_PG_CONNECT_TIMEOUT", "3")),
+}
 
 # Logging settings
 LOG_LEVEL = "INFO"

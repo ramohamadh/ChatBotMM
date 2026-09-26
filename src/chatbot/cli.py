@@ -114,18 +114,36 @@ def ask(
 def history(
     limit: int = typer.Option(20, "--limit", "-n", help="Number of entries to show."),
     full: bool = typer.Option(False, "--full", help="Show full answers, not a preview."),
+    user: str | None = typer.Option(None, "--user", "-u", help="Only this user's questions."),
+    users: bool = typer.Option(False, "--users", help="Per-user summary instead of entries."),
 ) -> None:
     """Show past questions and answers (persisted across sessions)."""
     from . import commands
 
     store = commands.get_chat_history()
-    entries = store.recent(limit) if store else []
+    if store is None:
+        commands.console.print("[yellow]Chat history is disabled.[/yellow]")
+        return
+    if users:
+        summaries = store.users()
+        if not summaries:
+            commands.console.print("[yellow]No chat history yet.[/yellow]")
+            return
+        for s in summaries:
+            last = (s["last_asked_at"] or "").replace("T", " ")
+            commands.console.print(
+                f"[cyan]{s['user_id'] or '(unknown)'}[/cyan]  "
+                f"{s['questions']} question(s)  [dim]last: {last}[/dim]"
+            )
+        return
+    entries = store.recent(limit, user_id=user)
     if not entries:
         commands.console.print("[yellow]No chat history yet — ask a question first.[/yellow]")
         return
     for entry in entries:
         date = entry["asked_at"].replace("T", " ")
-        commands.console.print(f"[cyan]{date}[/cyan]  [bold]{entry['question']}[/bold]")
+        who = f" [dim]({entry['user_id']})[/dim]" if entry.get("user_id") else ""
+        commands.console.print(f"[cyan]{date}[/cyan]{who}  [bold]{entry['question']}[/bold]")
         answer = entry["answer"] if full else entry["answer"][:200]
         suffix = "" if full or len(entry["answer"]) <= 200 else "…"
         commands.console.print(f"  {answer}{suffix}\n")

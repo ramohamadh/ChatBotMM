@@ -40,6 +40,9 @@ data/vectorstore/
 # Persistent chat history (local user data)
 data/history.db
 
+# Local secrets (copy .env.example -> .env and fill in)
+.env
+
 # Models cache (HuggingFace downloads are stored in ~/.cache by default)
 # .cache/
 # models/

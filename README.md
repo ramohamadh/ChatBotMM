@@ -101,10 +101,20 @@ curl -X POST http://127.0.0.1:8000/ask \
 
 | Endpoint | What it does |
 | --- | --- |
-| `POST /ask` | Answer a question. Body: `{"question": "...", "return_context": false}`. |
+| `POST /ask` | Answer a question. Body: `{"question": "...", "uuid": "<user uuid>", "taxpayer_id": "...", "session_id": "..."}` — identity fields are optional and recorded with the chat history. |
+| `GET /history` | Stored Q&A. Query: `user_id` (filter to one user), `limit`. |
+| `GET /users` | Per-user summary: who asked how many questions, and when. |
 | `POST /index` | (Re)index `data/docs/`. Body: `{"force": false}`. |
 | `GET /stats` | Index statistics. |
 | `GET /health` | Liveness / readiness (`indexed`, chunk count). |
+
+The API is designed to run as a standalone internal service called by the
+company backend (gorest) — see [INTEGRATION_FA.md](INTEGRATION_FA.md) for the
+contract, the Go snippet, and the PostgreSQL chat-history schema. History goes
+to PostgreSQL when reachable (see `HISTORY_*` in
+[config.py](src/chatbot/config.py)), otherwise falls back to local SQLite.
+Note: generation on CPU takes tens of seconds — callers need an HTTP timeout
+of at least 120 s on `POST /ask`.
 
 The answer model loads once at startup, so the first request is as fast as the
 rest. Questions are answered one at a time (the model is CPU-bound);
